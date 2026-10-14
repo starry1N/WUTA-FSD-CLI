@@ -1,9 +1,36 @@
-# FSD 交互启动包
+# WUTA-FSD-CLI
 
-2026-10-13复核，已同步10月13日工作；变更与验证范围见[工作记录](../docs/工作记录_2026-10-13.md)。
+WUTA 实车启动管理的 Rich/Textual 纯键盘 CLI/TUI，独立 Git 仓库，作为
+`WUTA2026_FINAL` 的 `fsd_startup` 子模块使用。保留原目录路径、启动入口、Mocha主题、
+权限处理、检查和所属进程清理行为。
+
+## 仓库与宿主集成
+
+- CLI 仓库：<https://github.com/starry1N/WUTA-FSD-CLI>
+- 宿主项目：<https://github.com/707GLobal/WUTA2026_FINAL>
+- 宿主根入口：`start_fsd_manager.sh`；实际实车编排仍由 `start_full_fsd.sh` 负责。
+
+从宿主仓库根目录初始化：
+
+```bash
+git submodule update --init --recursive
+bash fsd_startup/install_ui.sh
+```
+
+以下操作命令均从宿主仓库根目录执行。单独克隆 CLI 仓库用于维护源码；运行预检查、
+ROS遥测或实车编排及部分集成测试，仍需要宿主的 `tools/`、模块源码/配置和已安装的ROS驱动。
+本仓库不复制这些算法、配置来源或硬件启动器。
+
+本地 `sudo_askpass.local.sh`、缓存及运行记录不纳入 CLI 仓库。现有机器的本地认证文件保留；
+新克隆需自行配置该文件及 `700` 权限，或使用机器已有 sudo 认证。提交 CLI 后需在宿主更新
+子模块提交指针，宿主更新不自动包含 CLI 未提交内容。
+
+## 操作说明
+
+2026-10-14 拆分仓库；前次变更与验证范围见[宿主工作记录](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/工作记录_2026-10-13.md)。
 
 入口是根目录 `./start_fsd_manager.sh`，复用原 `start_full_fsd.sh` 的部署配置和有依赖的启动顺序。
-开发与维护见 [开发指南](../docs/DEVELOPMENT.md#startup-development)。
+开发与维护统一保留在宿主 `docs/`，见 [开发指南](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/DEVELOPMENT.md#startup-development)。
 默认使用 Rich + Textual 的纯键盘终端界面，操作、检查、车辆状态、传感器参数和日志均在一个终端内。
 默认立即尝试启动；首次建议用菜单模式先查看检查结果。界面关闭鼠标操作，无可点击按钮。
 
@@ -150,7 +177,7 @@ INT、TERM、KILL；root 进程使用自动认证的 `sudo -A kill`。旧会话�
 相关设备日志位于本次运行的 `modules/perception.log`、`modules/chcnav.log`；
 华测数据记录位于 `artifacts/chcnav/`。这些记录与页面内容不是一一对应关系。
 任务状态变化及设备自检事件统一写入 `manager.log`，完整日志目录说明见
-[运行日志](../docs/LOGGING.md)。
+[运行日志](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/LOGGING.md)。
 
 ## 验证
 
@@ -170,4 +197,4 @@ bash -n start_fsd_manager.sh start_full_fsd.sh fsd_startup/window.sh
 输出收集结束后归档为 logs/<赛项>/<运行时间>。未运行时管理事件写入 sessions。
 管理事件和任务监控统一进入 manager.log，不再生成 mission_monitor.log。
 终端组件日志页读取 module_log_dir；菜单、重试、权限处理和PID清理流程保持不变。
-完整目录和职责说明见 [运行日志](../docs/LOGGING.md)。
+完整目录和职责说明见 [运行日志](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/LOGGING.md)。

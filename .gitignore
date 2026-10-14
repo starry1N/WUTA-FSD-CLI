@@ -1,0 +1,14 @@
+# Local machine credential: never commit
+sudo_askpass.local.sh
+
+# Python and development artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+ui_deps/
+.runtime/
+logs/
