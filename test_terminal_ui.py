@@ -1,5 +1,6 @@
 """Drive the keyboard-only Textual interface without starting vehicle hardware."""
 import asyncio
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -9,7 +10,7 @@ sys.path.insert(0, str(ROOT / '.runtime/fsd_manager/ui_deps'))
 sys.path.insert(0, str(Path(__file__).parent))
 from manager import Manager
 from terminal_ui import FsdApp
-from textual.widgets import Button, DataTable, Input, OptionList, RichLog
+from textual.widgets import Button, DataTable, Input, OptionList, RichLog, Select
 
 
 def test_menu_keyboard_check_errors_views_and_exit(tmp_path):
@@ -91,4 +92,68 @@ def test_menu_keyboard_check_errors_views_and_exit(tmp_path):
     with patch.object(manager, 'ROOT', tmp_path), patch.object(manager, 'RUNTIME', tmp_path), \
             patch.object(manager, 'CHECKS', {'华测串口': failure}), \
             patch.object(terminal_ui, 'CHECKS', {'华测串口': failure}):
+        asyncio.run(scenario())
+
+
+def test_module_configuration_selector_keyboard_refresh_and_errors(tmp_path):
+    import manager
+
+    async def scenario():
+        instance = Manager([], color=False)
+        app = FsdApp(instance, telemetry=False)
+        manifest = {'files': {'controller': '/custom/controller.yaml', 'can': '/custom/can.yaml'},
+                    'parameters': {'controller': {'speed_limit': 2.0}, 'can': {'can': {'device': 'can0'}}},
+                    'deployment': {'can_device': 'can1'}}
+        try:
+            async with app.run_test(size=(110, 36)) as pilot:
+                await pilot.pause(.3)
+                await pilot.press('end', 'enter')
+                assert app.view == 'config'
+                assert '尚无配置清单' in app.content()
+                selector = app.query_one('#module-config', Select)
+                assert selector.display and not app.query_one('#component').display
+                manager.save(tmp_path / 'manifest.json', manifest)
+                await pilot.pause(.4)
+                await pilot.press('tab')
+                assert app.focused is selector
+                await pilot.press('enter', 'home', 'down', 'down', 'enter')
+                assert selector.value == 'can'
+                content = app.content()
+                assert selector.content_region.height >= selector.query_one('SelectCurrent').region.height
+                assert '/custom/can.yaml' in content and 'can1' in content
+                assert 'speed_limit' not in content
+                manifest['parameters']['can']['can']['device'] = 'can2'
+                manager.save(tmp_path / 'manifest.json', manifest)
+                await pilot.pause(.4)
+                assert selector.value == 'can'
+                assert 'can2' in app.content()
+                app.query_one('#views', OptionList).focus()
+                await pilot.press('home', 'down', 'down', 'down', 'down', 'enter')
+                assert app.view == 'modules'
+                assert not selector.display and app.query_one('#component').display
+                await pilot.press('end', 'enter')
+                assert app.view == 'config' and selector.value == 'can'
+                selector.focus()
+                await pilot.press('enter', 'home', 'enter')
+                assert selector.value == '__all__' and 'speed_limit' in app.content()
+                (tmp_path / 'manifest.json').write_text('{broken')
+                await pilot.pause(.4)
+                assert '配置清单读取失败' in app.content()
+                manager.save(tmp_path / 'manifest.json', manifest)
+                await pilot.pause(.4)
+                assert 'speed_limit' in app.content()
+                selector.value = 'can'
+                await pilot.pause(.1)
+                del manifest['files']['can']
+                del manifest['parameters']['can']
+                manager.save(tmp_path / 'manifest.json', manifest)
+                await pilot.pause(.4)
+                assert selector.value == '__all__'
+                app.action_quit()
+                await pilot.pause(.4)
+            assert not app.owner.is_alive()
+        finally:
+            instance.log.close()
+
+    with patch.object(manager, 'ROOT', tmp_path), patch.object(manager, 'RUNTIME', tmp_path):
         asyncio.run(scenario())

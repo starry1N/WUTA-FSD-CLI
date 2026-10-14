@@ -25,6 +25,10 @@ VIEWS = [('checks', '01  启动检查'), ('vehicle', '02  车辆状态'),
          ('modules', '05  组件日志'), ('config', '06  模块配置')]
 STYLES = {'ok': '#a6e3a1', 'error': '#f38ba8', 'warn': '#f9e2af',
           'info': '#89b4fa', 'title': 'bold #cba6f7', 'muted': '#a6adc8'}
+CONFIG_LABELS = {'controller': '控制器', 'can': 'CAN接口', 'camera': '相机检测',
+                 'adapter': '双目适配', 'lidar': '雷达检测', 'fusion': '检测融合',
+                 'mapping': '锥桶建图', 'boundary': '边界检测', 'planning': '路径规划',
+                 'ekf': 'EKF定位', 'mission': '任务状态机'}
 
 
 def summary(detail):
@@ -66,12 +70,13 @@ class FsdApp(App):
     #check-table > .datatable--header { background: #181825; color: #a6adc8; text-style: bold; }
     #check-table > .datatable--cursor { background: #313244; color: #cdd6f4; text-style: bold; }
     #check-table:focus > .datatable--cursor { background: #45475a; color: #cdd6f4; text-style: bold; }
-    #component { height: 3; margin-bottom: 1; }
+    #component, #module-config { height: 3; margin-bottom: 1; }
     #detail { height: 1fr; border: round #45475a; background: #1e1e2e; color: #cdd6f4; padding: 0 1; border-title-color: #a6adc8; }
     #detail:focus { border: round #89b4fa; }
     #actions { height: 2; margin: 1 2 0 2; color: #94e2d5; }
     #keys { height: 1; padding: 0 2; background: #11111b; color: #a6adc8; text-style: dim; }
     Select, SelectCurrent, SelectOverlay { background: #181825; color: #cdd6f4; border: round #45475a; }
+    Select { border: none; }
     * { scrollbar-background: #181825; scrollbar-color: #45475a; scrollbar-color-active: #89b4fa; }
     """
     BINDINGS = [Binding('c', 'operate("c")', '检查'), Binding('s', 'operate("s")', '启动'),
@@ -116,6 +121,9 @@ class FsdApp(App):
         self.last_content = None
         self.last_checks = None
         self.components = []
+        self.config_manifest = None
+        self.config_error = '[等待] 尚无配置清单，请先执行预检查。'
+        self.config_modules = []
 
     def compose(self) -> ComposeResult:
         yield Static('WUTA / FSD    ›    启动与诊断', id='brand')
@@ -128,6 +136,8 @@ class FsdApp(App):
                 yield Static('启动检查  /  独立模块并行执行', id='heading')
                 yield DataTable(id='check-table', cursor_type='row')
                 yield Select([], prompt='选择组件日志', id='component')
+                yield Select([('全部配置清单', '__all__')], prompt='选择模块配置',
+                             allow_blank=False, id='module-config')
                 yield RichLog(id='detail', wrap=True, markup=False, max_lines=3000, min_width=1)
         yield Static('C 检查   S 启动   P 权限   X 停止   Q 清理退出', id='actions')
         yield Static('↑↓ 选择   Enter 打开   Tab 切换区域   Space 暂停日志', id='keys')
@@ -137,6 +147,7 @@ class FsdApp(App):
         for title, width in [('阶段', 6), ('检查项目', 24), ('状态', 16), ('结果摘要', 45)]:
             table.add_column(title, width=width)
         self.query_one('#component').display = False
+        self.query_one('#module-config').display = False
         self.query_one('#views', OptionList).focus()
         self.query_one('#views', OptionList).highlighted = 0
         self.owner = threading.Thread(target=self.manager_loop, daemon=True)
@@ -223,6 +234,7 @@ class FsdApp(App):
         self.last_content = None
         self.query_one('#check-table').display = view == 'checks'
         self.query_one('#component').display = view == 'modules'
+        self.query_one('#module-config').display = view == 'config'
         title = dict(VIEWS)[view][4:]
         self.query_one('#heading', Static).update(title + ('  /  Enter 查看完整检查原因' if view == 'checks' else ''))
         self.render_content()
@@ -287,7 +299,34 @@ class FsdApp(App):
             selector.set_options([(Path(path).name, path) for path in available])
             if available:
                 selector.value = available[0]
+        self.refresh_config()
         self.render_content()
+
+    def refresh_config(self):
+        """List modules from the existing audit manifest, without another config source."""
+        path = self.manager.state_path.parent / 'manifest.json'
+        try:
+            manifest = json.loads(path.read_text())
+            if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict) or not isinstance(manifest.get('parameters'), dict):
+                raise ValueError('配置清单缺少 files / parameters 字典')
+            self.config_manifest = manifest
+            modules = list(dict.fromkeys([*manifest['files'], *manifest['parameters']]))
+            self.config_error = ''
+        except FileNotFoundError:
+            self.config_manifest = None
+            self.config_error = '[等待] 尚无配置清单，请先执行预检查。'
+            modules = []
+        except (OSError, ValueError) as exc:
+            self.config_manifest = None
+            self.config_error = f'[错误] 配置清单读取失败：{path}\n{exc}'
+            modules = []
+        if modules != self.config_modules:
+            selector = self.query_one('#module-config', Select)
+            previous = selector.value
+            selector.set_options([('全部配置清单', '__all__'),
+                                  *((f'{CONFIG_LABELS.get(key, key)} · {key}', key) for key in modules)])
+            selector.value = previous if previous in modules else '__all__'
+            self.config_modules = modules
 
     def content(self):
         if self.view == 'checks':
@@ -311,7 +350,22 @@ class FsdApp(App):
             except (OSError, ValueError, KeyError):
                 return '[等待] 只读 ROS 采集尚未就绪。' if self.use_telemetry else '[等待] 当前使用 --no-window 禁用了状态采集。'
         if self.view == 'config':
-            return tail(self.manager.state_path.parent / 'manifest.json', 200000)
+            if self.config_manifest is None:
+                return self.config_error
+            selection = self.query_one('#module-config', Select).value
+            if selection == '__all__':
+                return json.dumps(self.config_manifest, ensure_ascii=False, indent=2)
+            if not isinstance(selection, str) or selection not in self.config_modules:
+                return '[等待] 请选择模块配置。'
+            manifest = self.config_manifest
+            result = {'module': CONFIG_LABELS.get(selection, selection),
+                      'source': manifest['files'].get(selection),
+                      'parameters': manifest['parameters'].get(selection, {})}
+            overrides = {'camera': 'model_path', 'can': 'can_device'}
+            if selection in overrides:
+                field = overrides[selection]
+                result['deployment_selection'] = {field: manifest.get('deployment', {}).get(field)}
+            return '配置审计清单中的模块参数；不代表节点在线加载值。\n\n' + json.dumps(result, ensure_ascii=False, indent=2)
         if self.view == 'modules':
             value = self.query_one('#component', Select).value
             return tail(value) if isinstance(value, str) else '[等待] 尚无组件日志，启动后可选择。'
