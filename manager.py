@@ -18,10 +18,10 @@ import threading
 import time
 import traceback
 
-from checks import CHECKS, configuration
+from checks import CHECKS
 from processes import cleanup, descendants, identity, matches, send
 from privilege import sudo_command, sudo_environment
-from log_context import RunLog, new_directory
+from log_context import RunLog, new_directory, append_manager_event
 from runtime_checks import RuntimeChecks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +69,7 @@ class Manager:
         self.output_thread = None
         self.runtime_exit_code = None
         self.log = (folder / 'manager.log').open('a', buffering=1)
+        self.log_lock = threading.RLock()
         self.log_path = folder / 'manager.log'
         self.state_path = RUNTIME / 'state.json'
         self.previous_run_dir = None
@@ -89,15 +90,19 @@ class Manager:
         self.publish()
 
     def emit(self, text, level='info'):
-        line = f'[{datetime.now().astimezone().strftime("%H:%M:%S")}] {text}'
-        if not self.silent:
-            print((COLORS[level] if self.color else '') + line + ('\033[0m' if self.color else ''), flush=True)
-        self.ui_events.put(('log', (line, level)))
-        self.log.write(line + '\n')
+        with self.log_lock:
+            source_time_ns = time.time_ns()
+            line = f'[{datetime.now().astimezone().strftime("%H:%M:%S")}] {text}'
+            if not self.silent:
+                print((COLORS[level] if self.color else '') + line + ('\033[0m' if self.color else ''), flush=True)
+            self.ui_events.put(('log', (line, level)))
+            self.log.write(line + '\n')
+            append_manager_event(self.log_path, line + '\n', level, source_time_ns)
 
     def publish(self):
         state = {'manager': identity(os.getpid()), 'phase': self.phase,
                               'log': str(self.log_path), 'log_dir': self.log_dir,
+                              'log_events': str(self.log_path.with_name('manager.events.jsonl')),
                               'module_log_dir': str(Path(self.log_dir) / 'modules') if self.log_dir else '',
                               'run_id': self.run_log.data['run_id'] if self.run_log else None,
                               'checks': dict(self.results),
@@ -226,7 +231,9 @@ class Manager:
         except Exception:
             self.log_dir = str(self.run_log.path)
             with (self.run_log.path / 'manager.log').open('a') as stream:
-                stream.write('[日志警告] 归档失败，保留原目录：\n' + traceback.format_exc())
+                detail = '[日志警告] 归档失败，保留原目录：\n' + traceback.format_exc()
+                stream.write(detail)
+                append_manager_event(self.run_log.path / 'manager.log', detail, 'error')
         self.run_log = None
         self.runtime_exit_code = None
         self.log_path = self.session_log_path

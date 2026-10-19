@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import re
+import uuid
+import time
 
 MISSIONS = {0: 'trackdrive', 1: 'skidpad', 2: 'acceleration',
             3: 'inspection', 4: 'ebs_test'}
@@ -54,7 +57,7 @@ class RunLog:
                     ended_at=None, mode=mode, args=list(args), mission=mission,
                     status='starting', path=str(path), archive_state='pending',
                     paths={name: name for name in ('modules', 'configs', 'jrajectory', 'ros', 'artifacts', 'validation')},
-                    manager_log='manager.log')
+                    manager_log='manager.log', manager_events='manager.events.jsonl')
         run = cls(root, path, data)
         run.save()
         return run
@@ -106,3 +109,21 @@ class RunLog:
         self.data.update(path=str(self.path), archive_state='complete')
         self.save()
         return self.path
+
+
+def append_manager_event(log_path, text, level, source_time_ns=None):
+    """Mirror the existing manager log event; this does not create a second log owner."""
+    path = Path(log_path).with_name('manager.events.jsonl')
+    if path.exists() and path.stat().st_size:
+        with path.open('rb') as source:
+            match = re.match(rb'^\{"stream_id":"([0-9a-f]{32})"', source.read(96))
+        if match is None:
+            raise ValueError('Invalid existing manager event stream; preserve it for repair')
+        stream_id = match[1].decode('ascii')
+    else:
+        stream_id = uuid.uuid4().hex
+    event = {'stream_id': stream_id, 'source_stamp_ns': str(time.time_ns() if source_time_ns is None else source_time_ns),
+             'clock_domain': 'unix', 'level': level, 'text': text}
+    with path.open('a', encoding='utf-8', newline='\n') as output:
+        output.write(json.dumps(event, ensure_ascii=False, separators=(',', ':')) + '\n')
+    return event

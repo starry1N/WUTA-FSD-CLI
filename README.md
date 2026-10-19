@@ -201,3 +201,11 @@ bash -n start_fsd_manager.sh start_full_fsd.sh fsd_startup/window.sh
 管理事件和任务监控统一进入 manager.log，不再生成 mission_monitor.log。
 终端组件日志页读取 module_log_dir；菜单、重试、权限处理和PID清理流程保持不变。
 完整目录和职责说明见 [运行日志](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/LOGGING.md)。
+
+## E22完整实时日志与传感器状态（2026-10-19）
+
+CLI仍由既有Manager/独立全栈输出收集器写日志。在`manager.log`旁同步追加`manager.events.jsonl`，包含CLI事件Unix纳秒时间、等级和完整文字，多行堆栈不截断；这是同一写入者的结构化副本，不是第二个运行管理器。该文件随原运行目录一起归档。CLI原有界面和任务控制语义不变。
+
+只读采集器继续使用原有ROS订阅，在`telemetry.json`增加`sensors_data`、`vehicle_data`、`source_stamp_ns`和采集器错误；每项保留Header时间或显式未知，并记录源端接收时间。GNSS、惯导、雷达、相机、融合的详情沿用CLI，不把图像/点云放入JSON。采集缓存依旧0.5秒更新；无线发送率由无线组件独立限速。
+
+无线组件0.4.0读取事件文件增量及快照，PC落盘确认后推进日志断点，突发日志积压而不丢弃。原始日志文件保留到传输确认后，详情见主项目显示子模块`radio_link/README.md`。Linux拉取时同时更新`fsd_startup`和`fsd-visualization-code`，CLI与无线进程需按原流程重启；旧进程不会自动加载新格式。

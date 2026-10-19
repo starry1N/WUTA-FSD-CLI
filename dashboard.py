@@ -57,6 +57,13 @@ class Telemetry:
             item = self.samples.setdefault(key, {'times': deque(maxlen=1000)})
             item['times'].append(now)
             item['received'] = now
+            item['received_unix_ns'] = time.time_ns()
+            header = getattr(msg, 'header', None)
+            stamp = getattr(header, 'stamp', None)
+            source_ns = (int(stamp.sec) * 10**9 + int(stamp.nanosec)) if stamp is not None else 0
+            item['source_stamp_ns'] = str(source_ns)
+            item['time_origin'] = 'header' if source_ns else 'unknown'
+
             item['detail'] = message_summary(key, msg)
 
     def lines(self, keys):
@@ -76,6 +83,24 @@ class Telemetry:
                 lines += [f'[{"超时" if age > 3 else "在线"}] {key}：接收频率 {hz:.1f} Hz，距末帧 {age:.1f}s',
                           item['detail'], '']
         return '\n'.join(lines)
+
+    def snapshot(self, keys):
+        """Structured copies of the same samples shown by the CLI; no extra subscriptions."""
+        now = time.monotonic()
+        result = []
+        with self.lock:
+            for key in keys:
+                item = self.samples.get(key)
+                if item is None:
+                    result.append({'name': key, 'received': False})
+                    continue
+                times = [t for t in item['times'] if now-t <= 5]
+                hz = (len(times)-1)/(times[-1]-times[0]) if len(times)>1 and times[-1]>times[0] else 0
+                result.append({'name': key, 'received': True, 'age_s': round(now-item['received'], 1),
+                               'hz': round(hz, 1), 'detail': item['detail'],
+                               'source_stamp_ns': item['source_stamp_ns'], 'time_origin': item['time_origin'],
+                               'received_unix_ns': str(item['received_unix_ns'])})
+        return result
 
     def spin(self):
         node = None
@@ -148,7 +173,10 @@ def main():
         destination = Path(args.telemetry_json)
         try:
             while not telemetry.quit.is_set():
-                data = {'updated': time.time(),
+                data = {'updated': time.time(), 'source_stamp_ns': str(time.time_ns()),
+                        'collector_error': telemetry.error,
+                        'sensors_data': telemetry.snapshot(['GNSS', '惯导', '雷达', '相机', '融合']),
+                        'vehicle_data': telemetry.snapshot(['任务', '设备自检', '模式选择', 'GO广播', '急停广播', '控制请求']),
                         'vehicle': telemetry.lines(['任务', '设备自检', '模式选择', 'GO广播', '急停广播', '控制请求']),
                         'sensors': telemetry.lines(['GNSS', '惯导', '雷达', '相机', '融合'])}
                 temporary = destination.with_suffix('.tmp')
