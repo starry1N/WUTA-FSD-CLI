@@ -14,24 +14,39 @@ from mission_diagnostics import describe
 from manager import Manager
 
 
-@pytest.mark.parametrize('missions,category', [([], 'pending'),
-    (['acceleration'], 'acceleration'), (['trackdrive', 'skidpad'], 'multi_mission')])
-def test_archive_preserves_payload_and_metadata(tmp_path, missions, category):
-    run = RunLog.create(tmp_path)
+def test_mission_at_start_creates_project_directory(tmp_path):
+    run = RunLog.create(tmp_path, mission='acceleration', mission_source='vcu_mode_cache')
     original = run.path
-    (original / 'jrajectory/driven.csv').write_text('payload\n')
-    write_json(original / 'mission_history.json', [{'mission': m} for m in missions])
+    (original / 'trajectory/driven.csv').write_text('payload\n')
     destination = run.finish(0, 'test_exit')
-    assert destination.parent.name == category
-    assert (destination / 'jrajectory/driven.csv').read_text() == 'payload\n'
-    assert json.loads((destination / 'run.json').read_text())['path'] == str(destination)
-    assert destination == original or not original.exists()
+    assert destination == original
+    assert destination.parent.name == 'acceleration'
+    assert (destination / 'trajectory/driven.csv').read_text() == 'payload\n'
+    data = json.loads((destination / 'run.json').read_text())
+    assert data['mission'] == 'acceleration'
+    assert data['path'] == str(destination)
+
+
+def test_pending_run_moves_after_fallback_mission(tmp_path):
+    run = RunLog.create(tmp_path, mission_source='fallback_pending')
+    original = run.path
+    assert original.parent.name == 'pending'
+    # Simulate the read-only monitor updating run.json while the owner keeps
+    # its in-memory copy from startup.
+    data = json.loads((original / 'run.json').read_text())
+    data['mission'] = 'trackdrive'
+    data['mission_source'] = 'fallback_observed'
+    write_json(original / 'run.json', data)
+    destination = run.finish(0, 'test_exit')
+    assert destination.parent.name == 'trackdrive'
+    assert not original.exists()
 
 
 def test_archive_never_overwrites_and_explicit_output_stays_put(tmp_path):
-    run = RunLog.create(tmp_path)
-    write_json(run.path / 'mission_history.json', [{'mission': 'acceleration'}])
-    destination = tmp_path / 'logs/acceleration' / run.path.name
+    run = RunLog.create(tmp_path, mission_source='fallback_pending')
+    run.data['mission'] = 'acceleration'
+    run.save()
+    destination = tmp_path / 'wuta_logs/acceleration' / run.path.name
     destination.mkdir(parents=True)
     with pytest.raises(FileExistsError):
         run.finish(0, 'test')
@@ -41,21 +56,23 @@ def test_archive_never_overwrites_and_explicit_output_stays_put(tmp_path):
 
 
 def test_archive_keeps_driver_latest_link_usable(tmp_path):
-    run = RunLog.create(tmp_path)
-    driver = run.path/'artifacts/chcnav'
+    run = RunLog.create(tmp_path, mission_source='fallback_pending')
+    run.data['mission'] = 'acceleration'
+    run.save()
+    driver = run.path/'chcnav_log'
     session = driver/'123'
     session.mkdir(parents=True)
     (session/'events.log').write_text('driver-event')
     (driver/'latest').symlink_to(session)
-    write_json(run.path/'mission_history.json', [{'mission': 'acceleration'}])
     destination = run.finish(0, 'test')
-    assert (destination/'artifacts/chcnav/latest/events.log').read_text() == 'driver-event'
+    assert (destination/'chcnav_log/latest/events.log').read_text() == 'driver-event'
 
 
 def test_recovery_marks_interrupted_run_after_cleanup(tmp_path):
     import manager
-    run = RunLog.create(tmp_path)
-    write_json(run.path/'mission_history.json', [{'mission': 'skidpad'}])
+    run = RunLog.create(tmp_path, mission_source='fallback_pending')
+    run.data['mission'] = 'skidpad'
+    run.save()
     write_json(tmp_path/'state.json', {'log_dir': str(run.path)})
     with patch.object(manager, 'ROOT', tmp_path), patch.object(manager, 'RUNTIME', tmp_path):
         instance = Manager([], color=False)
@@ -76,7 +93,7 @@ def test_failed_precheck_retry_and_tail_do_not_duplicate_log(tmp_path, capsys):
             with patch.object(instance, 'permissions', return_value=False):
                 instance.start()
                 instance.start()
-            runs = list((tmp_path/'logs/pending').iterdir())
+            runs = list((tmp_path/'wuta_logs/pending').iterdir())
             assert len(runs) == 2
             assert all(json.loads((p/'run.json').read_text())['reason'] == 'precheck_failed' for p in runs)
             before = instance.log_path.read_bytes()
@@ -84,7 +101,7 @@ def test_failed_precheck_retry_and_tail_do_not_duplicate_log(tmp_path, capsys):
             assert instance.log_path.read_bytes() == before
             assert instance.run_log is None
             state = json.loads(instance.state_path.read_text())
-            assert state['module_log_dir'].endswith('/modules')
+            assert state['module_log_dir'].endswith('/fsd_modules')
         finally:
             instance.log.close()
 
@@ -97,7 +114,7 @@ def test_start_exception_returns_to_session_log(tmp_path):
             with patch.object(instance, 'permissions', side_effect=RuntimeError('injected')):
                 instance.start()
             assert instance.run_log is None
-            run = next((tmp_path/'logs/pending').iterdir())
+            run = next((tmp_path/'wuta_logs/pending').iterdir())
             assert 'injected' in (run/'manager.log').read_text()
             assert instance.log_path == instance.session_log_path
         finally:
@@ -109,9 +126,8 @@ def test_runtime_output_drained_before_archive(tmp_path):
     with patch.object(manager, 'ROOT', tmp_path), patch.object(manager, 'RUNTIME', tmp_path):
         instance = Manager([], color=False)
         try:
-            instance.run_log = RunLog.create(tmp_path)
+            instance.run_log = RunLog.create(tmp_path, mission='acceleration')
             instance.log_dir = str(instance.run_log.path)
-            write_json(instance.run_log.path/'mission_history.json', [{'mission': 'acceleration'}])
             instance.use_log(instance.run_log.path/'manager.log')
             instance.child = subprocess.Popen([sys.executable, '-c', 'print("unique-runtime-event")'],
                                              stdout=subprocess.PIPE, text=True)
@@ -135,6 +151,21 @@ def test_display_uses_authoritative_reasons_and_legacy_is_unknown():
     assert '未知' in describe(1, 2, 0, 'lap=0')['门控']
 
 
+def test_standalone_uses_vcu_mode_cache_mission(tmp_path, monkeypatch):
+    import run_logged
+    monkeypatch.setattr(run_logged, 'ROOT', tmp_path)
+    monkeypatch.setattr(run_logged.mode_cache, 'read_mission',
+                        lambda config: ({'mission': 'acceleration', 'vcu_mode': 2}, ''))
+    monkeypatch.setenv('FSD_RUN_MODE', 'hardware')
+    monkeypatch.setattr(sys, 'argv', ['run_logged', sys.executable, '-c', 'pass'])
+    assert run_logged.main() == 0
+    run = next((tmp_path/'wuta_logs/acceleration').iterdir())
+    data = json.loads((run/'run.json').read_text())
+    assert data['mission'] == 'acceleration'
+    assert data['mission_source'] == 'vcu_mode_cache'
+    assert data['vcu_mode'] == 2
+
+
 def test_standalone_owner_logs_once_and_preserves_exit_code(tmp_path):
     root = Path(__file__).resolve().parents[1]
     code = '''import sys
@@ -148,7 +179,7 @@ raise SystemExit(run_logged.main())
     result = subprocess.run([sys.executable, '-c', code, str(root/'tools'), str(tmp_path)],
                             capture_output=True, text=True, timeout=5)
     assert result.returncode == 17, result.stderr
-    run = next((tmp_path/'logs/pending').iterdir())
+    run = next((tmp_path/'wuta_logs/pending').iterdir())
     assert (run/'manager.log').read_text().count('one-event') == 1
     assert json.loads((run/'run.json').read_text())['exit_code'] == 17
 
@@ -208,7 +239,7 @@ raise SystemExit(run_logged.main())
                 break
             time.sleep(.02)
         assert reaped, output
-        run = next((tmp_path/'logs/pending').iterdir())
+        run = next((tmp_path/'wuta_logs/pending').iterdir())
         assert (run/'manager.log').read_text().count('tty-ready') == 1
         assert json.loads((run/'run.json').read_text())['exit_code'] == 0
     finally:

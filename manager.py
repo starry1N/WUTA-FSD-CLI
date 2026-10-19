@@ -22,6 +22,7 @@ from checks import CHECKS
 from processes import cleanup, descendants, identity, matches, send
 from privilege import sudo_command, sudo_environment
 from log_context import RunLog, new_directory, append_manager_event
+import mode_cache
 from runtime_checks import RuntimeChecks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +64,7 @@ class Manager:
         self.events = queue.Queue()
         self.phase = '等待操作'
         self.log_dir = ''
-        folder = new_directory(ROOT / 'logs/sessions')
+        folder = new_directory(ROOT / 'wuta_logs/sessions')
         self.session_log_path = folder / 'manager.log'
         self.run_log = None
         self.output_thread = None
@@ -77,7 +78,7 @@ class Manager:
             try:
                 previous = json.loads(self.state_path.read_text())
                 candidate = Path(previous.get('log_dir') or '/')
-                if candidate.is_relative_to(ROOT / 'logs') and (candidate / 'run.json').exists():
+                if candidate.is_relative_to(ROOT / 'wuta_logs') and (candidate / 'run.json').exists():
                     self.previous_run_dir = candidate
             except (OSError, ValueError):
                 pass
@@ -104,7 +105,7 @@ class Manager:
                               'log': str(self.log_path), 'log_dir': self.log_dir,
                               'log_events': str(self.log_path.with_name('manager.events.jsonl')),
                               'radio_log_events': str(self.log_path.with_name('manager.radio.events.jsonl')),
-                              'module_log_dir': str(Path(self.log_dir) / 'modules') if self.log_dir else '',
+                              'module_log_dir': str(Path(self.log_dir) / 'fsd_modules') if self.log_dir else '',
                               'run_id': self.run_log.data['run_id'] if self.run_log else None,
                               'checks': dict(self.results),
                               'runtime_checks': {key: dict(item) for key, item in self.runtime_checks.rows.items()},
@@ -282,12 +283,28 @@ class Manager:
         self.runtime_checks = RuntimeChecks(self.options)
         self.runtime_checks.begun = True
         mode = 'sensor_only' if 'sensor-only' in self.options else 'hardware'
+        mission = mission_source = vcu_mode = None
+        if mode == 'hardware':
+            config = self.options.get('can-config')
+            if config is True:
+                config = None
+            config = config or ROOT / 'WUTA-FSD/ros2_ws/src/system/can_interface/config/can_interface.yaml'
+            info, _ = mode_cache.read_mission(config)
+            if info:
+                mission = info['mission']
+                mission_source = 'vcu_mode_cache'
+                vcu_mode = info['vcu_mode']
+            else:
+                mission_source = 'fallback_pending'
         self.output_thread = None
         self.runtime_exit_code = None
-        self.run_log = RunLog.create(ROOT, mode=mode, args=self.args)
+        self.run_log = RunLog.create(ROOT, mode=mode, args=self.args, mission=mission,
+                                     mission_source=mission_source, vcu_mode=vcu_mode)
         self.log_dir = str(self.run_log.path)
         self.use_log(self.run_log.path / 'manager.log')
         self.publish()
+        if mode == 'hardware' and mission is None:
+            self.emit('未读到有效 VCU 模式缓存，本次日志先落 pending；收到实时模式后再归档。', 'warn')
         if 'build-only' not in self.options:
             if not self.permissions() or not self.checks():
                 self.phase = '预检查失败：可修复后重试'

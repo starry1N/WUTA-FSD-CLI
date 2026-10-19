@@ -177,8 +177,9 @@ INT、TERM、KILL；root 进程使用自动认证的 `sudo -A kill`。旧会话�
 
 目前没有专门追加保存传感器参数页的历史 log/CSV 文件，页面中的接收频率、末帧间隔、
 在线/超时状态和传感器摘要无法仅靠此缓存回放。
-相关设备日志位于本次运行的 `modules/perception.log`、`modules/chcnav.log`；
-华测数据记录位于 `artifacts/chcnav/`。这些记录与页面内容不是一一对应关系。
+相关设备日志位于本次运行的 `external_log/perception_drivers.log`、
+`fsd_modules/perception/perception.log`、`chcnav_log/driver.log`；
+华测数据记录位于 `chcnav_log/<时间戳>/`。这些记录与页面内容不是一一对应关系。
 任务状态变化及设备自检事件统一写入 `manager.log`，完整日志目录说明见
 [运行日志](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/LOGGING.md)。
 
@@ -186,6 +187,7 @@ INT、TERM、KILL；root 进程使用自动认证的 `sudo -A kill`。旧会话�
 
 ```bash
 /usr/bin/python3 -m pytest -q fsd_startup/test_startup.py fsd_startup/test_terminal_ui.py fsd_startup/test_check_alignment.py \
+  fsd_startup/test_logging.py fsd_startup/test_mode_cache.py \
   tools/test_can_reconnect.py tools/test_privileged_group.py tools/test_chcnav_serial_guard.py
 bash -n start_fsd_manager.sh start_full_fsd.sh fsd_startup/window.sh
 ```
@@ -196,8 +198,9 @@ bash -n start_fsd_manager.sh start_full_fsd.sh fsd_startup/window.sh
 
 ## 统一日志与归档
 
-每次 s 启动（含预检查失败）生成独立运行目录；未选赛项先写 pending，进程停止且
-输出收集结束后归档为 logs/<赛项>/<运行时间>。未运行时管理事件写入 sessions。
+每次 s 启动（含预检查失败）生成独立运行目录；启动前读取 ZLG 模式缓存，
+正常直接创建 wuta_logs/<赛项>/<YYYYmmdd_HHMMSS>；缓存不可用才先写 pending 后归档。
+未运行时管理事件写入 wuta_logs/sessions。
 管理事件和任务监控统一进入 manager.log，不再生成 mission_monitor.log。
 终端组件日志页读取 module_log_dir；菜单、重试、权限处理和PID清理流程保持不变。
 完整目录和职责说明见 [运行日志](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/LOGGING.md)。

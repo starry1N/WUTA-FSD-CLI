@@ -12,3 +12,4 @@ venv/
 ui_deps/
 .runtime/
 logs/
+wuta_logs/

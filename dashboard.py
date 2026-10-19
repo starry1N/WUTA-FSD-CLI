@@ -226,7 +226,7 @@ def main():
             state = json.loads(Path(args.state).read_text())
             status.set('管理状态：' + state['phase'] + '  |  只读监控；不发送模式、GO或控制指令')
             folder = Path(state.get('module_log_dir') or state['log_dir']) if state.get('log_dir') else None
-            available = sorted(p.name for p in folder.glob('*.log')) if folder else []
+            available = sorted(str(p.relative_to(folder)) for p in folder.rglob('*.log')) if folder else []
             files['values'] = available
             if available and component.get() not in available:
                 component.set(available[0])

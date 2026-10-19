@@ -292,13 +292,13 @@ class FsdApp(App):
             status += '   ·   日志已暂停'
         self.query_one('#status', Static).update(status)
         folder = self.state_data.get('module_log_dir') or self.state_data.get('log_dir')
-        available = sorted(str(path) for path in Path(folder).glob('*.log')) if folder else []
+        available = sorted(str(path.relative_to(folder)) for path in Path(folder).rglob('*.log')) if folder else []
         if available != self.components:
             self.components = available
             selector = self.query_one('#component', Select)
-            selector.set_options([(Path(path).name, path) for path in available])
+            selector.set_options([(path, str(Path(folder) / path)) for path in available])
             if available:
-                selector.value = available[0]
+                selector.value = str(Path(folder) / available[0])
         self.refresh_config()
         self.render_content()
 

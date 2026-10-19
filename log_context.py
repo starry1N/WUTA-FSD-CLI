@@ -8,8 +8,8 @@ import re
 import uuid
 import time
 
-MISSIONS = {0: 'trackdrive', 1: 'skidpad', 2: 'acceleration',
-            3: 'inspection', 4: 'ebs_test'}
+MISSION_NAMES = {'acceleration', 'skidpad', 'trackdrive', 'inspection', 'ebs_test'}
+COMMON_DIRS = ('configs', 'fsd_modules', 'external_log', 'ros', 'artifacts')
 
 
 def timestamp():
@@ -26,8 +26,9 @@ def write_json(path, data):
 def new_directory(parent):
     parent = Path(parent)
     parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(100):
-        path = parent / datetime.now().astimezone().strftime('%Y%m%d_%H%M%S_%f')
+    stamp = datetime.now().astimezone().strftime('%Y%m%d_%H%M%S')
+    for index in range(100):
+        path = parent / (stamp if index == 0 else f'{stamp}_{index:02d}')
         try:
             path.mkdir()
             return path
@@ -41,22 +42,35 @@ class RunLog:
         self.root, self.path, self.data = Path(root), Path(path), data
 
     @classmethod
-    def create(cls, root, mode='hardware', args=(), mission=None, path=None):
+    def create(cls, root, mode='hardware', args=(), mission=None,
+               mission_source=None, vcu_mode=None, path=None):
         root = Path(root).resolve()
+        if mission not in MISSION_NAMES:
+            mission = None
         category = mission or ('sensor_only' if mode == 'sensor_only' else 'pending')
-        if category not in {*MISSIONS.values(), 'sensor_only', 'pending'}:
-            raise ValueError('未知赛项：' + category)
         if path is None:
-            path = new_directory(root / 'logs' / category)
+            path = new_directory(root / 'wuta_logs' / category)
         else:
             path = Path(path).resolve()
             path.mkdir(parents=True, exist_ok=False)
-        for folder in ('modules', 'configs', 'jrajectory', 'ros', 'artifacts', 'validation'):
+        folders = list(COMMON_DIRS)
+        if mode != 'simulation':
+            folders.extend(('zlgCAN_log', 'chcnav_log'))
+        if mode != 'sensor_only':
+            folders.append('trajectory')
+        if mode == 'simulation':
+            folders.append('validation')
+        for folder in folders:
             (path / folder).mkdir()
-        data = dict(schema_version=1, run_id=path.name, started_at=timestamp(),
+        source = mission_source or (
+            'sensor_only' if mode == 'sensor_only' else
+            'cli' if mission else 'fallback_pending')
+        data = dict(schema_version=2, run_id=path.name, started_at=timestamp(),
                     ended_at=None, mode=mode, args=list(args), mission=mission,
+                    mission_source=source, vcu_mode=vcu_mode,
+                    mission_observed_at=timestamp() if mission else None,
                     status='starting', path=str(path), archive_state='pending',
-                    paths={name: name for name in ('modules', 'configs', 'jrajectory', 'ros', 'artifacts', 'validation')},
+                    paths={name: name for name in folders},
                     manager_log='manager.log', manager_events='manager.events.jsonl',
                     manager_radio_events='manager.radio.events.jsonl')
         run = cls(root, path, data)
@@ -77,22 +91,17 @@ class RunLog:
 
     def finish(self, exit_code, reason):
         """Called by the owner only after writers and runtime processes stop."""
-        history_path = self.path / 'mission_history.json'
-        history = json.loads(history_path.read_text()) if history_path.exists() else []
-        missions = list(dict.fromkeys(item['mission'] for item in history))
-        if self.data['mission'] and self.data['mission'] not in missions:
-            missions.insert(0, self.data['mission'])
-        category = ('sensor_only' if self.data['mode'] == 'sensor_only' else
-                    'multi_mission' if len(missions) > 1 else
-                    missions[0] if missions else 'pending')
-        if category not in {*MISSIONS.values(), 'sensor_only', 'multi_mission', 'pending'}:
-            raise ValueError('非法归档类别')
-        self.data.update(ended_at=timestamp(), exit_code=exit_code, reason=reason,
-                         status='finished' if exit_code == 0 else 'failed', missions=missions,
-                         mission=missions[0] if len(missions) == 1 else None, category=category)
-        # Explicit user output locations (e.g. regression batches) stay in place.
-        if self.path.parent == self.root / 'logs' / 'pending' and category != 'pending':
-            destination = self.root / 'logs' / category / self.path.name
+        # Pending runs may have been updated by the read-only monitor.
+        try:
+            current = json.loads((self.path / 'run.json').read_text())
+            if not self.data.get('mission') and current.get('mission') in MISSION_NAMES:
+                for key in ('mission', 'mission_source', 'mission_observed_at'):
+                    self.data[key] = current.get(key)
+        except (OSError, ValueError, AttributeError):
+            pass
+        mission = self.data.get('mission')
+        if self.path.parent == self.root / 'wuta_logs' / 'pending' and mission in MISSION_NAMES:
+            destination = self.root / 'wuta_logs' / mission / self.path.name
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists():
                 raise FileExistsError(destination)
@@ -107,7 +116,9 @@ class RunLog:
                         link.symlink_to(relative)
             self.path.rename(destination)
             self.path = destination
-        self.data.update(path=str(self.path), archive_state='complete')
+        self.data.update(ended_at=timestamp(), exit_code=exit_code, reason=reason,
+                         status='finished' if exit_code == 0 else 'failed',
+                         path=str(self.path))
         self.save()
         return self.path
 
