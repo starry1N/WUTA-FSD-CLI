@@ -57,7 +57,8 @@ class RunLog:
                     ended_at=None, mode=mode, args=list(args), mission=mission,
                     status='starting', path=str(path), archive_state='pending',
                     paths={name: name for name in ('modules', 'configs', 'jrajectory', 'ros', 'artifacts', 'validation')},
-                    manager_log='manager.log', manager_events='manager.events.jsonl')
+                    manager_log='manager.log', manager_events='manager.events.jsonl',
+                    manager_radio_events='manager.radio.events.jsonl')
         run = cls(root, path, data)
         run.save()
         return run
@@ -111,9 +112,44 @@ class RunLog:
         return self.path
 
 
-def append_manager_event(log_path, text, level, source_time_ns=None):
-    """Mirror the existing manager log event; this does not create a second log owner."""
-    path = Path(log_path).with_name('manager.events.jsonl')
+_radio_fault_context = set()
+
+
+def necessary_radio_event(log_path, text, level):
+    """Select operational events; retain following untagged failure diagnostics intact."""
+    key = str(Path(log_path).resolve())
+    plain = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
+    plain = re.sub(r'^\[\d{2}:\d{2}:\d{2}\]\s*', '', plain).strip()
+    # The launcher tags delimit diagnostic blocks; ROS [INFO]/[ERROR] tails do not.
+    boundary = re.match(r'^\[(?:成功|启动|检查|提示|认证|管理|状态(?:\s+[^\]]+)?)\]', plain)
+    routine = (level == 'title' or plain.startswith((
+        '终端已就绪', '实时日志窗口已打开', '已打开实时日志窗口',
+        '没有图形桌面', 's 启动/重试', '运行记录：', '认证 sudo：',
+        '已授予当前用户 ', '华测串口权限已满足：')))
+    if boundary or routine:
+        _radio_fault_context.discard(key)
+    fault = level.lower() in ('error', 'fatal', 'warn', 'warning') or re.search(
+        r'失败|错误|异常|超时|断开|离线|Traceback|\b(?:ERROR|FATAL|WARN(?:ING)?)\b|'
+        r'\b\w*(?:Error|Exception)\b|permission denied|no such file|not found|'
+        r'segmentation fault|core dumped|timed out|unable to|cannot open',
+        plain, re.I)
+    if fault and not (routine and level.lower() not in ('error', 'fatal')):
+        _radio_fault_context.add(key)
+        return True
+    if routine:
+        return False
+    if re.match(r'^\[状态\s+\d{2}:\d{2}:\d{2}\]', plain):
+        return True
+    if any(token in plain for token in (
+            '预检查通过', '全栈启动检查完成', '启动任务已提交', '启动任务结束',
+            '[管理] 本次运行结束', '[管理] 运行结束',
+            '本启动包登记的运行进程已清理')):
+        _radio_fault_context.discard(key)
+        return True
+    return key in _radio_fault_context
+
+
+def _append_event(path, text, level, source_time_ns):
     if path.exists() and path.stat().st_size:
         with path.open('rb') as source:
             match = re.match(rb'^\{"stream_id":"([0-9a-f]{32})"', source.read(96))
@@ -126,4 +162,13 @@ def append_manager_event(log_path, text, level, source_time_ns=None):
              'clock_domain': 'unix', 'level': level, 'text': text}
     with path.open('a', encoding='utf-8', newline='\n') as output:
         output.write(json.dumps(event, ensure_ascii=False, separators=(',', ':')) + '\n')
+    return event
+
+
+def append_manager_event(log_path, text, level, source_time_ns=None):
+    """Keep full local events and a separately identified essential radio stream."""
+    stamp = time.time_ns() if source_time_ns is None else source_time_ns
+    event = _append_event(Path(log_path).with_name('manager.events.jsonl'), text, level, stamp)
+    if necessary_radio_event(log_path, text, level):
+        _append_event(Path(log_path).with_name('manager.radio.events.jsonl'), text, level, stamp)
     return event

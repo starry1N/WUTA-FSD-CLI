@@ -103,6 +103,7 @@ class Manager:
         state = {'manager': identity(os.getpid()), 'phase': self.phase,
                               'log': str(self.log_path), 'log_dir': self.log_dir,
                               'log_events': str(self.log_path.with_name('manager.events.jsonl')),
+                              'radio_log_events': str(self.log_path.with_name('manager.radio.events.jsonl')),
                               'module_log_dir': str(Path(self.log_dir) / 'modules') if self.log_dir else '',
                               'run_id': self.run_log.data['run_id'] if self.run_log else None,
                               'checks': dict(self.results),
@@ -149,6 +150,7 @@ class Manager:
                 self.publish()
         ok = all(item['ok'] for item in self.results.values())
         self.phase = '预检查通过' if ok else '预检查失败：可修复后重试'
+        self.emit(self.phase, 'ok' if ok else 'error')
         self.publish()
         return ok
 

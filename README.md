@@ -208,4 +208,6 @@ CLI仍由既有Manager/独立全栈输出收集器写日志。在`manager.log`�
 
 只读采集器继续使用原有ROS订阅，在`telemetry.json`增加`sensors_data`、`vehicle_data`、`source_stamp_ns`和采集器错误；每项保留Header时间或显式未知，并记录源端接收时间。GNSS、惯导、雷达、相机、融合的详情沿用CLI，不把图像/点云放入JSON。采集缓存依旧0.5秒更新；无线发送率由无线组件独立限速。
 
-无线组件0.4.0读取事件文件增量及快照，PC落盘确认后推进日志断点，突发日志积压而不丢弃。原始日志文件保留到传输确认后，详情见主项目显示子模块`radio_link/README.md`。Linux拉取时同时更新`fsd_startup`和`fsd-visualization-code`，CLI与无线进程需按原流程重启；旧进程不会自动加载新格式。
+0.5.0起按用户要求只转发必要信息：原日志所有者额外生成`manager.radio.events.jsonl`，由`log_context.py:necessary_radio_event`筛选错误、警告及其连续诊断上下文、任务监控变化和启动/退出汇总；菜单/窗口操作、逐项成功、启动等待和普通构建进度只保留在本地全文中。两种journal使用不同stream ID，已选事件保留完整文字和原源时间；旧全文journal不自动作为新无线源。Manager状态文件的`radio_log_events`指向当前必要journal。
+
+无线组件0.5.0读取必要事件增量及原传感器快照，PC落盘确认后推进日志断点。关键日志突发仍可能积压，不以删除已选事件追赶实时。详情见主项目显示子模块`radio_link/README.md`。Linux拉取时同时更新`fsd_startup`和`fsd-visualization-code`，CLI与无线进程需按原流程重启；旧进程不会自动加载新规则。
