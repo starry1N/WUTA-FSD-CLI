@@ -166,7 +166,8 @@ class Manager:
         self.runtime_checks.set('sudo', '认证通过', 'sudo 自动认证通过；CAN初始化和串口权限处理使用此权限', True)
         if 'reuse-ins' in self.options:
             return True
-        port = self.options.get('ins-port', os.environ.get('INS_PORT', '/dev/ttyUSB0'))
+        port = self.options.get('ins-port', os.environ.get(
+            'INS_PORT', '/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_BKEDc143M08-if00-port0'))
         device = Path(port).resolve(strict=True)
         if not stat.S_ISCHR(device.stat().st_mode):
             raise ValueError(f'{device} 不是串口字符设备')

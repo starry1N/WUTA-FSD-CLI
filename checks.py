@@ -45,7 +45,8 @@ def dependencies(options):
 
 
 def serial(options):
-    port = options.get('ins-port', os.environ.get('INS_PORT', '/dev/ttyUSB0'))
+    port = options.get('ins-port', os.environ.get(
+        'INS_PORT', '/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_BKEDc143M08-if00-port0'))
     if not os.access(port, os.R_OK | os.W_OK):
         raise RuntimeError(f'{port} 不存在或当前用户不可读写；菜单 p 可设置当前用户 ACL')
     if 'reuse-ins' in options:
