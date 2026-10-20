@@ -96,7 +96,7 @@ class RunLog:
                     status='starting', path=str(path), archive_state='pending',
                     paths={name: name for name in folders},
                     manager_log='manager.log', manager_events='manager.events.jsonl',
-                    manager_radio_events='manager.radio.events.jsonl')
+                    manager_radio_events='manager.events.jsonl')
         run = cls(root, path, data)
         run.save()
         if mode != 'simulation':
@@ -109,7 +109,7 @@ class RunLog:
         return {'scope': self.data['radio_scope'],
                 't': self.data.get('ended_stamp_ns', self.data['started_stamp_ns']),
                 'label': self.data['run_id'], 'active': self.data.get('ended_at') is None,
-                'journal': str(self.path / 'manager.radio.events.jsonl')}
+                'journal': str(self.path / 'manager.events.jsonl')}
 
     def save(self):
         write_json(self.path / 'run.json', self.data)

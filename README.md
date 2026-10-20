@@ -227,3 +227,9 @@ CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，�
 无线0.6.0仅传此指针指定的运行，不补历史目录。新启动切换待发队列并重置Foxglove会话，终端日志历史同步清空；图形日志窗口结束后保留本次manager.log。Linux的全文文件不删除。普通GNSS状态切换由传感器快照发送，必要日志不再重复这些info行；错误/警告及关键任务事件继续保留。
 
 配合115200串口、62.5 kbps模块空速与3000 UART字节/秒双向预算，详情见显示子模块radio_link/README.md。CLI与收发两端需同时更新；缺少运行选择时无线端提示重启新版CLI，不回退历史补传。
+
+## 0.6.2：当次CLI完整日志（当前策略）
+
+按用户要求，当前运行的radio_run.journal、run.json的manager_radio_events及Manager状态radio_log_events改为完整的manager.events.jsonl。所有写入当次CLI主日志的事件均转发，包含普通info、GNSS状态、检查/启动进度、构建输出及完整多行错误，不再受必要事件规则筛选。旧manager.radio.events.jsonl仍可留作兼容产物，但不再是新版运行的无线源。
+
+仅跟随当次运行，不遍历历史运行；组件独立文件不额外批量上传，只有原本进入CLI主日志的内容走此完整事件流。源时间、落盘确认、断点及新运行清理旧显示机制保持。Linux需要同时拉取显示和CLI子模块，重启CLI与无线发送进程后生效。
