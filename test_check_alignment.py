@@ -26,9 +26,9 @@ def test_runtime_catalog_covers_original_processes_and_topics():
 
 def test_topic_success_never_follows_only_process_success():
     progress = RuntimeChecks({})
-    progress.consume('[启动] ZED / M1 驱动与感知算法组 ...')
+    progress.consume('[启动] 感知算法组 ...')
     assert progress.rows['process:perception']['status'] == '启动中'
-    progress.consume('[成功] ZED / M1 驱动与感知算法组：进程已启动（PID=123）；日志：/tmp/perception.log')
+    progress.consume('[成功] 感知算法组：进程已启动（PID=123）；日志：/tmp/perception.log')
     assert progress.rows['process:perception']['ok'] is True
     assert progress.rows['topic:检测融合输出']['ok'] is None
     progress.consume('[检查] 检测融合输出：等待 /custom/cones（最多 20 秒）...')

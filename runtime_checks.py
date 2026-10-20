@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 
 SOURCE = Path(__file__).resolve().parents[1] / 'start_full_fsd.sh'
-PROCESS_NAMES = ('zlg_can', 'chcnav', 'map_to_odom', 'base_to_zed', 'perception', 'ekf',
+PROCESS_NAMES = ('zlg_can', 'chcnav', 'map_to_odom', 'base_to_zed', 'perception_drivers', 'perception', 'ekf',
                  'localization_manager', 'cone_map_builder', 'boundary_detector',
                  'path_generator', 'controller', 'can_interface', 'mission_manager', 'visualization')
 FULL_ONLY = {'map_to_odom', 'base_to_zed', 'ekf', 'localization_manager', 'cone_map_builder',
@@ -16,7 +16,7 @@ BUILDS = {'华测构建': '华测驱动与消息包构建完成', 'FSD构建': '
 
 class RuntimeChecks:
     def __init__(self, options):
-        labels = dict(re.findall(r"^\s*(\w+)\) echo '([^']+)' ;;", SOURCE.read_text(), re.M))
+        labels = dict(re.findall(r"^\s*(\w+)\) echo '([^']+)' ;;", SOURCE.read_text(encoding='utf-8'), re.M))
         self.labels = {name: labels.get(name, name) for name in PROCESS_NAMES}
         self.rows = OrderedDict()
         self.options = options

@@ -160,6 +160,31 @@ def tail(path, limit=40000):
         return f'[等待] {path}\n{exc}'
 
 
+def component_log_files(state):
+    """Shared catalog for both UIs; labels distinguish the current run's log groups."""
+    folder = Path(state['log_dir']) if state.get('log_dir') else None
+    roots = ([folder / name for name in
+              ('fsd_modules', 'external_log', 'chcnav_log', 'zlgCAN_log', 'modules')]
+             if folder else [])
+    if state.get('module_log_dir'):
+        legacy = Path(state['module_log_dir'])
+        if legacy not in roots:
+            roots.append(legacy)
+    files = {}
+    for root in roots:
+        try:
+            for path in root.rglob('*.log'):
+                if not path.is_file():
+                    continue
+                label = (str(path.relative_to(folder)) if folder and path.is_relative_to(folder)
+                         else str(Path(root.name) / path.relative_to(root)))
+                files[label] = str(path.absolute())
+        except OSError:
+            # A pending run may be moved while the UI is refreshing.
+            continue
+    return sorted(files.items())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--state', required=True)
@@ -225,15 +250,16 @@ def main():
         try:
             state = json.loads(Path(args.state).read_text())
             status.set('管理状态：' + state['phase'] + '  |  只读监控；不发送模式、GO或控制指令')
-            folder = Path(state.get('module_log_dir') or state['log_dir']) if state.get('log_dir') else None
-            available = sorted(str(p.relative_to(folder)) for p in folder.rglob('*.log')) if folder else []
-            files['values'] = available
+            available = dict(component_log_files(state))
+            files['values'] = list(available)
             if available and component.get() not in available:
-                component.set(available[0])
+                component.set(next(iter(available)))
+            elif not available:
+                component.set('')
             selected = view.get()
             if selected == '车辆状态':
                 content = telemetry.lines(['任务', '设备自检', '模式选择', 'GO广播', '急停广播', '控制请求'])
-                content += '\nCAN 原始收发与 VCU->FSD 计数见“组件日志 / zlg_can.log”。\n'
+                content += '\nCAN 原始收发与 VCU->FSD 计数见“组件日志 / zlgCAN_log/bridge.log”。\n'
                 content += 'GO与模式广播为最近事件，实际门控以任务状态诊断为准。\n'
             elif selected == '传感器参数':
                 content = telemetry.lines(['GNSS', '惯导', '雷达', '相机', '融合'])
@@ -242,7 +268,7 @@ def main():
                 content = tail(ROOT / '.runtime/fsd_manager/manifest.json', 200000)
                 content += '\n\n并行检查结果：\n' + json.dumps(state.get('checks', {}), ensure_ascii=False, indent=2)
             elif selected == '组件日志':
-                content = tail(folder / component.get()) if folder and component.get() else '[等待] 尚无运行组件日志'
+                content = tail(available[component.get()]) if component.get() in available else '[等待] 尚无运行组件日志'
             else:
                 content = tail(state['log'])
             if not paused.get() and content != previous[0]:

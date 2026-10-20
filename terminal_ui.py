@@ -3,7 +3,6 @@ from collections import deque
 import asyncio
 import json
 import os
-from pathlib import Path
 import queue
 import threading
 import time
@@ -18,7 +17,7 @@ from textual.widgets import DataTable, OptionList, RichLog, Select, Static
 from textual.widgets.option_list import Option
 
 from checks import CHECKS
-from dashboard import tail
+from dashboard import tail, component_log_files
 
 VIEWS = [('checks', '01  启动检查'), ('vehicle', '02  车辆状态'),
          ('sensors', '03  传感器参数'), ('logs', '04  实时日志'),
@@ -291,14 +290,14 @@ class FsdApp(App):
         if self.paused:
             status += '   ·   日志已暂停'
         self.query_one('#status', Static).update(status)
-        folder = self.state_data.get('module_log_dir') or self.state_data.get('log_dir')
-        available = sorted(str(path.relative_to(folder)) for path in Path(folder).rglob('*.log')) if folder else []
+        available = component_log_files(self.state_data)
         if available != self.components:
             self.components = available
             selector = self.query_one('#component', Select)
-            selector.set_options([(path, str(Path(folder) / path)) for path in available])
-            if available:
-                selector.value = str(Path(folder) / available[0])
+            selected = selector.value
+            selector.set_options(available)
+            paths = {path for _, path in available}
+            selector.value = selected if selected in paths else available[0][1] if available else Select.BLANK
         self.refresh_config()
         self.render_content()
 
