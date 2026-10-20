@@ -69,8 +69,9 @@ class RuntimeChecks:
     def consume(self, line):
         match = re.search(r'GNSS：(-?\d+)（.*?），门控=(.*)', line)
         if match:
-            ready = match.group(2) == '通过'
-            self.set('gnss', 'GNSS已就绪' if ready else match.group(2), line, True if ready else None)
+            gate = match.group(2)
+            ready = gate in ('通过', '不要求（车检）')
+            self.set('gnss', 'GNSS门控通过' if gate == '通过' else gate, line, True if ready else None)
         if line.startswith('[启动] '):
             for name, label in self.labels.items():
                 if line.startswith('[启动] ' + label + ' ...'):

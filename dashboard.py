@@ -12,15 +12,13 @@ import traceback
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from mission_diagnostics import describe
-from gnss_status import gnss_description, gnss_allows_start
+from gnss_status import gnss_description
 
 
 def message_summary(key, msg):
     if key == 'GNSS':
         code = int(msg.stat[1])
-        return f'GNSS 状态码={code}（{gnss_description(code)}）；' + (
-            '定位门控通过：允许下一阶段' if gnss_allows_start(code) else
-            '惯导原始数据在线，持续等待状态4；不判设备自检失败')
+        return f'GNSS 状态码={code}（{gnss_description(code)}）；惯导原始数据在线，状态码不判设备自检失败'
     if key == '惯导':
         p, v = msg.pose.pose.position, msg.twist.twist.linear
         return f'位置(m) x={p.x:.3f} y={p.y:.3f} z={p.z:.3f}；速度(m/s) x={v.x:.3f} y={v.y:.3f}'
@@ -65,6 +63,9 @@ class Telemetry:
             item['time_origin'] = 'header' if source_ns else 'unknown'
 
             item['detail'] = message_summary(key, msg)
+            if key == '任务':
+                item['gnss_gate'] = describe(msg.state, msg.mission_mode, msg.localization_mode,
+                                             msg.description).get('GNSS', '').partition('门控=')[2]
 
     def lines(self, keys):
         now = time.monotonic()
@@ -82,6 +83,15 @@ class Telemetry:
                 hz = (len(times) - 1) / (times[-1] - times[0]) if len(times) > 1 and times[-1] > times[0] else 0
                 lines += [f'[{"超时" if age > 3 else "在线"}] {key}：接收频率 {hz:.1f} Hz，距末帧 {age:.1f}s',
                           item['detail'], '']
+                if key == 'GNSS':
+                    mission = self.samples.get('任务')
+                    if not mission or not mission.get('gnss_gate'):
+                        gate = '未知（等待任务机诊断）'
+                    elif now - mission['received'] > 3:
+                        gate = '未知（任务机诊断超时）'
+                    else:
+                        gate = mission['gnss_gate']
+                    lines += ['任务机GNSS门控：' + gate, '']
         return '\n'.join(lines)
 
     def snapshot(self, keys):
