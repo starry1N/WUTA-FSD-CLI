@@ -32,7 +32,7 @@ ROS遥测或实车编排及部分集成测试，仍需要宿主的 `tools/`、�
 入口是根目录 `./start_fsd_manager.sh`，复用原 `start_full_fsd.sh` 的部署配置和有依赖的启动顺序。
 开发与维护统一保留在宿主 `docs/`，见 [开发指南](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/DEVELOPMENT.md#startup-development)。
 默认使用 Rich + Textual 的纯键盘终端界面，操作、检查、车辆状态、传感器参数和日志均在一个终端内。
-默认立即尝试启动；首次建议用菜单模式先查看检查结果。界面关闭鼠标操作，无可点击按钮。
+默认立即尝试启动；首次建议用菜单模式先查看检查结果。界面关闭鼠标操作；新增E键参数编辑页通过Tab/Enter操作按钮。
 
 ```bash
 ./start_fsd_manager.sh --menu                    # 单终端菜单，暂不启动车辆
@@ -45,8 +45,8 @@ ROS遥测或实车编排及部分集成测试，仍需要宿主的 `tools/`、�
 ```
 
 原脚本的模型、串口、外参、控制器和 CAN 配置等参数继续透传。
-管理包自己的选项为 `--menu`、`--plain`、`--no-window`、`--no-color`、`--check`、`--status`、`--stop`。
-需要交互终端启动；非交互环境可执行只读 `--check`。没有图形桌面时使用 `--no-rviz`，终端内仍可查看状态。
+管理包自己的选项为 `--menu`、`--headless`、`--plain`、`--no-window`、`--no-color`、`--check`、`--status`、`--stop`。
+默认需要交互终端；无终端常驻管理使用 `--headless --menu`。非交互环境也可执行只读 `--check`。没有图形桌面时使用 `--no-rviz`，终端内仍可查看状态。
 `--no-window` 在新界面中禁用后台状态采集；`--plain` 保留旧逐行菜单及旧 Tk 窗口。
 界面依赖独立安装在 `.runtime/fsd_manager/ui_deps`，不会添加到 ROS 子进程的 Python 搜索路径。
 重新安装依赖执行 `bash fsd_startup/install_ui.sh`；版本在 `requirements-ui.txt` 固定。
@@ -233,3 +233,17 @@ CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，�
 按用户要求，当前运行的radio_run.journal、run.json的manager_radio_events及Manager状态radio_log_events改为完整的manager.events.jsonl。所有写入当次CLI主日志的事件均转发，包含普通info、GNSS状态、检查/启动进度、构建输出及完整多行错误，不再受必要事件规则筛选。旧manager.radio.events.jsonl仍可留作兼容产物，但不再是新版运行的无线源。
 
 仅跟随当次运行，不遍历历史运行；组件独立文件不额外批量上传，只有原本进入CLI主日志的内容走此完整事件流。源时间、落盘确认、断点及新运行清理旧显示机制保持。Linux需要同时拉取显示和CLI子模块，重启CLI与无线发送进程后生效。
+
+## CLI统一配置与远程操作（2026-10-20）
+
+本地按E进入参数编辑，选择模块和完整YAML路径，输入JSON值，Tab/Enter暂存、保存。跨模块草稿一次校验提交；未保存时可Esc退出。原模块配置页仍是manifest审计快照，编辑页直接读取所选源文件。
+
+统一API在Manager原工作线程串行执行，`control_api.py`接收文件邮箱，`config_store.py`复用宿主tools的目录与一致性校验。文件保存使用SHA256版本检查、保留注释的标量补丁、事务备份与原子替换；不热改运行算法，不自动重启。支持标量及定长标量数组，不新增/删除YAML结构。保存后待确认加载状态保守持久保留。
+
+主仓库根可执行 `python3 fsd_startup/control_api.py config.list`、`config.read --module controller`、`config.set --updates '<JSON列表>'` 以及 `cli.status`、`cli.check`、`cli.start`、`cli.stop`。原请求结果查询：`cli.result --request-id <32位ID>`。调用者只投递邮箱，不自行启动进程。
+
+无线0.7.0通过现有E22双向扩展调用同一接口，Foxglove Parameters编辑PC草稿，Publish按钮提交保存/检查/启动/停止。Linux CLI需常驻；例如 `bash start_fsd_manager.sh --headless --menu --skip-build --no-rviz`，保留现场原部署参数。CLI stop操作停止所属FSD进程并保留管理器，根入口 `--stop` 仍清理并退出管理器。无线程序独立启动和保留。启动返回表示启动流程已提交，全栈就绪看phase和日志。
+
+持久邮箱在 `.runtime/fsd_manager/control/`：inbox请求、results结果、heartbeat.json状态、transactions备份。UUID去重、boot及停止run绑定、到期限制防止迟到请求重复执行；超时结果未知需查原ID。不要在在途请求期间清理邮箱或结果。详细模块来源、字段、限制和部署步骤见宿主 [FOXGLOVE_PARAMETERS](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/FOXGLOVE_PARAMETERS.md)。
+
+本轮仅完成源码实现与人工阅读，按用户要求未运行测试、构建、WSL或实机操作；未改动现场YAML，需配套更新宿主、CLI和显示子模块并重启加载。

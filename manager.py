@@ -24,6 +24,7 @@ from privilege import sudo_command, sudo_environment
 from log_context import RunLog, new_directory, append_manager_event, reset_radio_run
 import mode_cache
 from runtime_checks import RuntimeChecks
+from control_api import ControlAPI
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / '.runtime/fsd_manager'
@@ -89,6 +90,7 @@ class Manager:
         self.runtime_checks = RuntimeChecks(self.options)
         self.ui_events = queue.Queue()
         self.silent = False
+        self.control = ControlAPI(self, ROOT)
         self.publish()
 
     def emit(self, text, level='info'):
@@ -111,8 +113,12 @@ class Manager:
                               'run_id': self.run_log.data['run_id'] if self.run_log else None,
                               'checks': dict(self.results),
                               'runtime_checks': {key: dict(item) for key, item in self.runtime_checks.rows.items()},
-                              'failures': list(self.failures), 'args': self.args}
+                              'failures': list(self.failures), 'args': self.args,
+                              'control': self.control.state(),
+                              'running': bool(self.child and self.child.poll() is None)}
         save(self.state_path, state)
+        self.control.snapshot = {'phase': self.phase, 'running': state['running'],
+                                 'run': (self.radio_run or {}).get('scope')}
         self.ui_events.put(('state', state))
 
     def checks(self):
@@ -356,6 +362,7 @@ class Manager:
         self.remember(self.dashboard.pid)
 
     def pump(self):
+        self.control.pump()
         self.drain_events()
         if self.child:
             if self.child.poll() is None:
@@ -416,22 +423,33 @@ class Manager:
         return not remaining
 
     def menu(self):
-        self.emit('s 启动/重试 | c 并行检查 | p 权限处理 | w 日志窗口 | l 日志尾部 | x 停止并清残留 | q 清理并退出 | h 菜单', 'title')
+        self.emit('s 启动/重试 | c 并行检查 | p 权限处理 | w 日志窗口 | l 日志尾部 | x 停止并清残留 | q 清理并退出 | h 菜单；配置接口：python3 fsd_startup/control_api.py --help', 'title')
+
+    def operate(self, operation):
+        """Single business entry for local keys and remote API requests."""
+        if operation in ('check', 'start') and self.child and self.child.poll() is None:
+            self.emit('运行期间不能重复启动或执行串口独占预检查；请先停止。', 'warn')
+            return False
+        if operation == 'check':
+            return self.checks()
+        if operation == 'start':
+            self.start()
+            return bool(self.child and self.child.poll() is None)
+        if operation == 'stop':
+            return self.stop()
+        raise ValueError('Unknown Manager operation')
 
     def command(self, command):
         if command == 's':
-            self.start()
+            self.operate('start')
         elif command == 'c':
-            if self.child and self.child.poll() is None:
-                self.emit('运行期间请在日志窗口查看状态；串口独占预检查需先停止。', 'warn')
-            else:
-                self.checks()
+            self.operate('check')
         elif command == 'p':
             self.permissions()
         elif command == 'w':
             self.window()
         elif command == 'x':
-            self.stop()
+            self.operate('stop')
         elif command == 'l':
             print(self.log_path.read_text()[-12000:], flush=True)
         elif command == 'q':
@@ -446,6 +464,7 @@ def main():
     parser.add_argument('--menu', action='store_true', help='只打开菜单，不立即启动车辆节点')
     parser.add_argument('--no-window', action='store_true')
     parser.add_argument('--plain', action='store_true', help='旧逐行菜单；默认使用 Textual 单终端界面')
+    parser.add_argument('--headless', action='store_true', help='常驻管理接口，无终端界面；配合--menu等待远端操作')
     parser.add_argument('--no-color', action='store_true')
     parser.add_argument('--check', action='store_true', help='只做并行只读检查')
     parser.add_argument('--stop', action='store_true', help='请求正在运行的管理器清理并退出')
@@ -480,14 +499,15 @@ def main():
     manager = Manager(forwarded, not args.no_color)
     if args.check:
         return 0 if manager.checks() else 1
-    if not sys.stdin.isatty():
+    if not sys.stdin.isatty() and not args.headless:
         manager.emit('交互启动需要终端。只读验证可执行 --check；桌面使用终端运行本入口。', 'error')
         return 2
     requested = []
     signal.signal(signal.SIGINT, lambda *_: requested.append('x'))
     signal.signal(signal.SIGTERM, lambda *_: requested.append('q'))
+    manager.control.start()
     try:
-        if not args.plain:
+        if not args.plain and not args.headless:
             dependency_dir = RUNTIME / 'ui_deps'
             if dependency_dir.is_dir():
                 sys.path.insert(0, str(dependency_dir))
@@ -504,7 +524,7 @@ def main():
         try:
             manager.recover()
             if not args.no_window:
-                manager.window()
+                manager.telemetry() if args.headless else manager.window()
         except Exception:
             manager.emit('会话恢复/窗口启动失败，保留菜单：\n' + traceback.format_exc(), 'error')
         manager.menu()
@@ -516,8 +536,13 @@ def main():
         while True:
             try:
                 manager.pump()
+                # Plain/headless modes have no Textual consumer for these UI snapshots.
+                while not manager.ui_events.empty():
+                    manager.ui_events.get_nowait()
                 command = requested.pop(0) if requested else None
-                if command is None and select.select([sys.stdin], [], [], .25)[0]:
+                if args.headless:
+                    time.sleep(.2)
+                elif command is None and select.select([sys.stdin], [], [], .25)[0]:
                     line = sys.stdin.readline()
                     command = line.strip().lower() if line else 'q'
                 if command is not None and manager.command(command):
@@ -527,6 +552,7 @@ def main():
                 manager.menu()
                 time.sleep(.2)
     finally:
+        manager.control.close()
         if manager.run_log is not None or any(matches(item) for item in manager.records.values()):
             manager.stop(include_dashboard=True)
         manager.log.close()

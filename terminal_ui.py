@@ -18,6 +18,7 @@ from textual.widgets.option_list import Option
 
 from checks import CHECKS
 from dashboard import tail, component_log_files
+from config_editor import ConfigEditor
 
 VIEWS = [('checks', '01  启动检查'), ('vehicle', '02  车辆状态'),
          ('sensors', '03  传感器参数'), ('logs', '04  实时日志'),
@@ -82,7 +83,7 @@ class FsdApp(App):
                 Binding('p', 'operate("p")', '权限'), Binding('x', 'operate("x")', '停止'),
                 Binding('q', 'quit', '清理退出'), Binding('ctrl+q', 'quit', show=False, priority=True),
                 Binding('ctrl+c', 'operate("x")', show=False, priority=True),
-                Binding('space', 'pause_log', '暂停日志')]
+                Binding('space', 'pause_log', '暂停日志'), Binding('e', 'edit_config', '编辑配置')]
 
     def __init__(self, manager, *, auto_start=False, requested=None, telemetry=True, color=True):
         # Color is an explicit launcher preference, independent of inherited NO_COLOR.
@@ -138,7 +139,7 @@ class FsdApp(App):
                 yield Select([('全部配置清单', '__all__')], prompt='选择模块配置',
                              allow_blank=False, id='module-config')
                 yield RichLog(id='detail', wrap=True, markup=False, max_lines=3000, min_width=1)
-        yield Static('C 检查   S 启动   P 权限   X 停止   Q 清理退出', id='actions')
+        yield Static('C 检查   S 启动   P 权限   X 停止   E 编辑配置   Q 清理退出', id='actions')
         yield Static('↑↓ 选择   Enter 打开   Tab 切换区域   Space 暂停日志', id='keys')
 
     def on_mount(self):
@@ -220,6 +221,9 @@ class FsdApp(App):
 
     def action_quit(self):
         self.action_operate('q')
+
+    def action_edit_config(self):
+        self.push_screen(ConfigEditor(self.manager))
 
     def action_pause_log(self):
         self.paused = not self.paused
