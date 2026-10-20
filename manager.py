@@ -21,7 +21,7 @@ import traceback
 from checks import CHECKS
 from processes import cleanup, descendants, identity, matches, send
 from privilege import sudo_command, sudo_environment
-from log_context import RunLog, new_directory, append_manager_event
+from log_context import RunLog, new_directory, append_manager_event, reset_radio_run
 import mode_cache
 from runtime_checks import RuntimeChecks
 
@@ -64,6 +64,7 @@ class Manager:
         self.events = queue.Queue()
         self.phase = '等待操作'
         self.log_dir = ''
+        self.radio_run = reset_radio_run(ROOT)
         folder = new_directory(ROOT / 'wuta_logs/sessions')
         self.session_log_path = folder / 'manager.log'
         self.run_log = None
@@ -105,6 +106,7 @@ class Manager:
                               'log': str(self.log_path), 'log_dir': self.log_dir,
                               'log_events': str(self.log_path.with_name('manager.events.jsonl')),
                               'radio_log_events': str(self.log_path.with_name('manager.radio.events.jsonl')),
+                              'radio_run': self.radio_run,
                               'module_log_dir': str(Path(self.log_dir) / 'fsd_modules') if self.log_dir else '',
                               'run_id': self.run_log.data['run_id'] if self.run_log else None,
                               'checks': dict(self.results),
@@ -238,6 +240,7 @@ class Manager:
                 detail = '[日志警告] 归档失败，保留原目录：\n' + traceback.format_exc()
                 stream.write(detail)
                 append_manager_event(self.run_log.path / 'manager.log', detail, 'error')
+        self.radio_run = self.run_log.radio_selection()
         self.run_log = None
         self.runtime_exit_code = None
         self.log_path = self.session_log_path
@@ -301,6 +304,7 @@ class Manager:
         self.run_log = RunLog.create(ROOT, mode=mode, args=self.args, mission=mission,
                                      mission_source=mission_source, vcu_mode=vcu_mode)
         self.log_dir = str(self.run_log.path)
+        self.radio_run = self.run_log.radio_selection()
         self.use_log(self.run_log.path / 'manager.log')
         self.publish()
         if mode == 'hardware' and mission is None:

@@ -256,6 +256,11 @@ class FsdApp(App):
                 self.exit()
                 return
             if kind == 'state':
+                previous = (self.state_data.get('radio_run') or {}).get('scope')
+                current = (payload.get('radio_run') or {}).get('scope')
+                if current is not None and current != previous:
+                    self.history.clear()
+                    self.last_content = None
                 self.state_data = payload
             else:
                 self.history.append(payload)

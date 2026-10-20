@@ -23,6 +23,29 @@ def write_json(path, data):
     temporary.replace(path)
 
 
+def publish_radio_run(root, selection, *, only_if_current=False):
+    """The existing log owner selects one run; radio never chooses historical runs."""
+    if selection is None:
+        return
+    path = Path(root) / '.runtime/fsd_manager/radio_run.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if only_if_current:
+        try:
+            current = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return
+        if not isinstance(current, dict) or current.get('scope') != selection['scope']:
+            return
+    write_json(path, selection)
+
+
+def reset_radio_run(root):
+    selection = {'scope': uuid.uuid4().hex, 'journal': None, 'label': '',
+                 't': str(time.time_ns()), 'active': False}
+    publish_radio_run(root, selection)
+    return selection
+
+
 def new_directory(parent):
     parent = Path(parent)
     parent.mkdir(parents=True, exist_ok=True)
@@ -66,6 +89,7 @@ class RunLog:
             'sensor_only' if mode == 'sensor_only' else
             'cli' if mission else 'fallback_pending')
         data = dict(schema_version=2, run_id=path.name, started_at=timestamp(),
+                    radio_scope=uuid.uuid4().hex, started_stamp_ns=str(time.time_ns()),
                     ended_at=None, mode=mode, args=list(args), mission=mission,
                     mission_source=source, vcu_mode=vcu_mode,
                     mission_observed_at=timestamp() if mission else None,
@@ -75,7 +99,17 @@ class RunLog:
                     manager_radio_events='manager.radio.events.jsonl')
         run = cls(root, path, data)
         run.save()
+        if mode != 'simulation':
+            publish_radio_run(root, run.radio_selection())
         return run
+
+    def radio_selection(self):
+        if not self.data.get('radio_scope'):
+            return None  # Recovering a historical run must not select it for radio.
+        return {'scope': self.data['radio_scope'],
+                't': self.data.get('ended_stamp_ns', self.data['started_stamp_ns']),
+                'label': self.data['run_id'], 'active': self.data.get('ended_at') is None,
+                'journal': str(self.path / 'manager.radio.events.jsonl')}
 
     def save(self):
         write_json(self.path / 'run.json', self.data)
@@ -116,10 +150,13 @@ class RunLog:
                         link.symlink_to(relative)
             self.path.rename(destination)
             self.path = destination
-        self.data.update(ended_at=timestamp(), exit_code=exit_code, reason=reason,
+        self.data.update(ended_at=timestamp(), ended_stamp_ns=str(time.time_ns()),
+                         exit_code=exit_code, reason=reason,
                          status='finished' if exit_code == 0 else 'failed',
                          path=str(self.path))
         self.save()
+        if self.data['mode'] != 'simulation':
+            publish_radio_run(self.root, self.radio_selection(), only_if_current=True)
         return self.path
 
 
@@ -139,6 +176,8 @@ def necessary_radio_event(log_path, text, level):
         '已授予当前用户 ', '华测串口权限已满足：')))
     if boundary or routine:
         _radio_fault_context.discard(key)
+    if level in ('info', 'ok') and re.match(r'^\[状态\s+\d{2}:\d{2}:\d{2}\] GNSS：', plain):
+        return False  # Latest GNSS detail is already carried by the sensor snapshot.
     fault = level.lower() in ('error', 'fatal', 'warn', 'warning') or re.search(
         r'失败|错误|异常|超时|断开|离线|Traceback|\b(?:ERROR|FATAL|WARN(?:ING)?)\b|'
         r'\b\w*(?:Error|Exception)\b|permission denied|no such file|not found|'

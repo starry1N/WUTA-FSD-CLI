@@ -219,3 +219,11 @@ CLI仍由既有Manager/独立全栈输出收集器写日志。在`manager.log`�
 无线组件0.5.0读取必要事件增量及原传感器快照，PC落盘确认后推进日志断点。关键日志突发仍可能积压，不以删除已选事件追赶实时。详情见主项目显示子模块`radio_link/README.md`。Linux拉取时同时更新`fsd_startup`和`fsd-visualization-code`，CLI与无线进程需按原流程重启；旧进程不会自动加载新规则。
 
 新`wuta_logs/`布局需配合无线0.5.1：扫描新旧根目录及状态文件路径，日志归档移动后按stream ID继续处理磁盘确认；无线格式与源时间不变。Windows可运行`python -m pytest -q fsd_startup/test_log_views.py`验证日志列表和进程检查映射，无需导入Linux Manager；完整交互回归仍使用原`test_terminal_ui.py`在Linux运行。
+
+## 当次启动无线日志（0.6.0）
+
+CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，由原日志所有者发布`.runtime/fsd_manager/radio_run.json`；Manager状态的`radio_run`保留同一scope、必要journal路径、源纳秒时间及运行状态。结束归档只更新当前scope的路径，不把较旧运行重新选为当前。直接全栈入口也复用RunLog选择；仿真不替换实车选择。
+
+无线0.6.0仅传此指针指定的运行，不补历史目录。新启动切换待发队列并重置Foxglove会话，终端日志历史同步清空；图形日志窗口结束后保留本次manager.log。Linux的全文文件不删除。普通GNSS状态切换由传感器快照发送，必要日志不再重复这些info行；错误/警告及关键任务事件继续保留。
+
+配合115200串口、62.5 kbps模块空速与3000 UART字节/秒双向预算，详情见显示子模块radio_link/README.md。CLI与收发两端需同时更新；缺少运行选择时无线端提示重启新版CLI，不回退历史补传。

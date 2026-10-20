@@ -280,7 +280,8 @@ def main():
             elif selected == '组件日志':
                 content = tail(available[component.get()]) if component.get() in available else '[等待] 尚无运行组件日志'
             else:
-                content = tail(state['log'])
+                journal = (state.get('radio_run') or {}).get('journal')
+                content = tail(Path(journal).with_name('manager.log') if journal else state['log'])
             if not paused.get() and content != previous[0]:
                 text.configure(state='normal')
                 text.delete('1.0', 'end')
