@@ -4,6 +4,10 @@ WUTA 实车启动管理的 Rich/Textual 纯键盘 CLI/TUI，独立 Git 仓库，
 `WUTA2026_FINAL` 的 `fsd_startup` 子模块使用。保留原目录路径、启动入口、Mocha主题、
 权限处理、检查和所属进程清理行为。
 
+## 当前使用入口
+
+本地Textual按E编辑配置，原模块配置页仍显示manifest审计快照。统一API由Manager原线程执行配置读写、检查、启动、停止；Foxglove“参数控制”编辑草稿并保存，“CLI 日志与控制”执行管理操作。停止FSD保留CLI，--stop仍清理并退出管理器；无终端等待使用--headless --menu。当前无线转发当次manager.events.jsonl全文，必要journal只作历史兼容。完整语义见宿主[参数与CLI接口文档](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/FOXGLOVE_PARAMETERS.md)。
+
 ## 仓库与宿主集成
 
 - CLI 仓库：<https://github.com/starry1N/WUTA-FSD-CLI>
@@ -214,13 +218,13 @@ CLI仍由既有Manager/独立全栈输出收集器写日志。在`manager.log`�
 
 只读采集器继续使用原有ROS订阅，在`telemetry.json`增加`sensors_data`、`vehicle_data`、`source_stamp_ns`和采集器错误；每项保留Header时间或显式未知，并记录源端接收时间。GNSS、惯导、雷达、相机、融合的详情沿用CLI，不把图像/点云放入JSON。采集缓存依旧0.5秒更新；无线发送率由无线组件独立限速。
 
-0.5.0起按用户要求只转发必要信息：原日志所有者额外生成`manager.radio.events.jsonl`，由`log_context.py:necessary_radio_event`筛选错误、警告及其连续诊断上下文、任务监控变化和启动/退出汇总；菜单/窗口操作、逐项成功、启动等待和普通构建进度只保留在本地全文中。两种journal使用不同stream ID，已选事件保留完整文字和原源时间；旧全文journal不自动作为新无线源。Manager状态文件的`radio_log_events`指向当前必要journal。
+历史0.5.0曾只转发必要信息（0.6.2后已改全文）：原日志所有者额外生成`manager.radio.events.jsonl`，由`log_context.py:necessary_radio_event`筛选错误、警告及其连续诊断上下文、任务监控变化和启动/退出汇总；菜单/窗口操作、逐项成功、启动等待和普通构建进度只保留在本地全文中。两种journal使用不同stream ID，已选事件保留完整文字和原源时间；旧全文journal不自动作为新无线源。Manager状态文件的`radio_log_events`指向当前必要journal。
 
 无线组件0.5.0读取必要事件增量及原传感器快照，PC落盘确认后推进日志断点。关键日志突发仍可能积压，不以删除已选事件追赶实时。详情见主项目显示子模块`radio_link/README.md`。Linux拉取时同时更新`fsd_startup`和`fsd-visualization-code`，CLI与无线进程需按原流程重启；旧进程不会自动加载新规则。
 
 新`wuta_logs/`布局需配合无线0.5.1：扫描新旧根目录及状态文件路径，日志归档移动后按stream ID继续处理磁盘确认；无线格式与源时间不变。Windows可运行`python -m pytest -q fsd_startup/test_log_views.py`验证日志列表和进程检查映射，无需导入Linux Manager；完整交互回归仍使用原`test_terminal_ui.py`在Linux运行。
 
-## 当次启动无线日志（0.6.0）
+## 当次启动无线日志（0.6.0历史策略）
 
 CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，由原日志所有者发布`.runtime/fsd_manager/radio_run.json`；Manager状态的`radio_run`保留同一scope、必要journal路径、源纳秒时间及运行状态。结束归档只更新当前scope的路径，不把较旧运行重新选为当前。直接全栈入口也复用RunLog选择；仿真不替换实车选择。
 
