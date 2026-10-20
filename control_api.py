@@ -113,7 +113,18 @@ class ControlAPI:
 
     def pump(self):
         # Called only by the same worker which executes local Manager.command.
-        pending = sorted(self.inbox.glob('*.json'), key=lambda path: (path.stat().st_mtime_ns, path.name))
+        def order(path):
+            priority = False
+            try:
+                if path.stat().st_size <= 262144:
+                    request = json.loads(path.read_text(encoding='utf-8'))
+                    priority = request.get('op') in ('cli.check', 'cli.start', 'cli.stop',
+                                                    'cli.status', 'cli.result', 'config.set')
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass  # Normal validation below produces the persisted error.
+            return (not priority, path.stat().st_mtime_ns, path.name)
+
+        pending = sorted(self.inbox.glob('*.json'), key=order)
         if not pending:
             return
         path = pending[0]

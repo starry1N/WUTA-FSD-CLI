@@ -247,3 +247,5 @@ CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，�
 持久邮箱在 `.runtime/fsd_manager/control/`：inbox请求、results结果、heartbeat.json状态、transactions备份。UUID去重、boot及停止run绑定、到期限制防止迟到请求重复执行；超时结果未知需查原ID。不要在在途请求期间清理邮箱或结果。详细模块来源、字段、限制和部署步骤见宿主 [FOXGLOVE_PARAMETERS](https://github.com/707GLobal/WUTA2026_FINAL/blob/main/docs/FOXGLOVE_PARAMETERS.md)。
 
 本轮仅完成源码实现与人工阅读，按用户要求未运行测试、构建、WSL或实机操作；未改动现场YAML，需配套更新宿主、CLI和显示子模块并重启加载。
+
+无线0.7.1配套：邮箱优先执行待处理的cli.check/start/stop/status/result及config.set，再处理config.list/read；同级保持到达顺序，仍由Manager原工作线程串行执行，不能抢断正在进行的操作。指令与结果的无线优先级由显示子模块独立commands队列负责，CLI不直接读写串口。未运行测试或实机操作。
