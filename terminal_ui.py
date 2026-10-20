@@ -306,7 +306,10 @@ class FsdApp(App):
             selected = selector.value
             selector.set_options(available)
             paths = {path for _, path in available}
-            selector.value = selected if selected in paths else available[0][1] if available else Select.BLANK
+            if available:
+                selector.value = selected if selected in paths else available[0][1]
+            else:
+                selector.clear()
         self.refresh_config()
         self.render_content()
 

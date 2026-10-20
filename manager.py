@@ -11,6 +11,7 @@ import queue
 import re
 import select
 import signal
+import shutil
 import stat
 import subprocess
 import sys
@@ -61,6 +62,7 @@ class Manager:
         self.color = color
         self.child = None
         self.dashboard = None
+        self.radio = None
         self.records = {}
         self.events = queue.Queue()
         self.phase = '等待操作'
@@ -361,7 +363,73 @@ class Manager:
         threading.Thread(target=self.read_output, args=(self.dashboard,), daemon=True).start()
         self.remember(self.dashboard.pid)
 
+    def ensure_radio(self, mode='bridge'):
+        """Start an independent sender; never register it as a vehicle child."""
+        entry = ROOT / 'fsd-visualization-code/radio_link/start_linux.sh'
+        config = entry.parent / 'radio.yaml'
+        folder = ROOT / '.runtime/fsd_radio'
+        try:
+            if not entry.is_file():
+                raise FileNotFoundError(f'无线入口不存在：{entry}')
+            folder.mkdir(parents=True, exist_ok=True)
+            self.radio_log = folder / 'linux.log'
+            with (folder / 'sender.lock').open('a') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    self.emit('无线发送进程已运行，保留其现有配置。')
+                    self.open_radio_terminal(entry, mode, follow=True)
+                    return
+            # Recognize senders started before the shared lock was introduced.
+            for process in Path('/proc').iterdir():
+                if not process.name.isdigit():
+                    continue
+                try:
+                    argv = (process / 'cmdline').read_bytes().decode().split('\0')
+                except (OSError, UnicodeError):
+                    continue
+                if 'fsd_radio.cli' in argv and 'linux' in argv and str(config) in argv:
+                    self.emit(f'无线发送进程已运行（PID={process.name}），保留其现有配置。')
+                    self.open_radio_terminal(entry, mode, follow=True)
+                    return
+            if self.open_radio_terminal(entry, mode):
+                return
+            with self.radio_log.open('ab', buffering=0) as output:
+                self.radio = subprocess.Popen(
+                    ['bash', str(entry), '--mode', mode], cwd=entry.parent,
+                    stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                    start_new_session=True)
+            self.emit(f'已提交独立无线发送进程（PID={self.radio.pid}）；日志：{self.radio_log}。退出CLI不停止无线。')
+        except OSError as exc:
+            self.emit(f'无线启动失败，CLI仍可独立运行：{exc}', 'warn')
+
+    def open_radio_terminal(self, entry, mode, *, follow=False):
+        """A terminal adapter only; the sender retains its own entry and lock."""
+        terminal = shutil.which('gnome-terminal')
+        if not terminal or not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+            self.emit('没有可用桌面终端；无线保持后台独立运行，日志：' + str(self.radio_log), 'warn')
+            return False
+        with (self.radio_log.parent / 'terminal.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.emit('独立无线终端已打开。')
+                return True
+        with self.radio_log.open('ab', buffering=0) as output:
+            self.radio = subprocess.Popen(
+                [terminal, '--wait', '--window', '--title=FSD 无线发送', '--',
+                 'bash', str(ROOT / 'fsd_startup/radio_window.sh'),
+                 str(entry), mode, str(self.radio_log), 'follow' if follow else 'run'],
+                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                start_new_session=True)
+        self.emit('已打开独立无线终端' + ('（查看已有发送进程日志）' if follow else '（运行无线发送程序）') + '；退出CLI不关闭此窗口。')
+        return True
+
     def pump(self):
+        if self.radio is not None and self.radio.poll() is not None:
+            code = self.radio.returncode
+            self.radio = None
+            self.emit(f'无线窗口/后台启动进程已退出（退出码={code}）；CLI继续运行，详情：{self.radio_log}', 'warn')
         self.control.pump()
         self.drain_events()
         if self.child:
@@ -466,6 +534,9 @@ def main():
     parser.add_argument('--plain', action='store_true', help='旧逐行菜单；默认使用 Textual 单终端界面')
     parser.add_argument('--headless', action='store_true', help='常驻管理接口，无终端界面；配合--menu等待远端操作')
     parser.add_argument('--no-color', action='store_true')
+    parser.add_argument('--no-radio', action='store_true', help='仅启动CLI，不自动拉起独立无线发送端')
+    parser.add_argument('--radio-mode', choices=('bridge', 'native'), default='bridge',
+                        help='自动启动无线的显示输入模式；已有无线进程保持原配置')
     parser.add_argument('--check', action='store_true', help='只做并行只读检查')
     parser.add_argument('--stop', action='store_true', help='请求正在运行的管理器清理并退出')
     parser.add_argument('--status', action='store_true')
@@ -502,6 +573,8 @@ def main():
     if not sys.stdin.isatty() and not args.headless:
         manager.emit('交互启动需要终端。只读验证可执行 --check；桌面使用终端运行本入口。', 'error')
         return 2
+    if not args.no_radio and 'build-only' not in manager.options:
+        manager.ensure_radio(args.radio_mode)
     requested = []
     signal.signal(signal.SIGINT, lambda *_: requested.append('x'))
     signal.signal(signal.SIGTERM, lambda *_: requested.append('q'))

@@ -49,7 +49,11 @@ ROS遥测或实车编排及部分集成测试，仍需要宿主的 `tools/`、�
 ```
 
 原脚本的模型、串口、外参、控制器和 CAN 配置等参数继续透传。
-管理包自己的选项为 `--menu`、`--headless`、`--plain`、`--no-window`、`--no-color`、`--check`、`--status`、`--stop`。
+管理包自己的选项为 `--menu`、`--headless`、`--plain`、`--no-window`、`--no-color`、`--no-radio`、`--radio-mode`、`--check`、`--status`、`--stop`。
+
+正常打开CLI（包括菜单、headless和登录自启）时，默认通过宿主已有 `fsd-visualization-code/radio_link/start_linux.sh --mode bridge` 拉起独立无线发送进程。`--radio-mode native`选择原生显示输入；已有发送进程复用原配置。`--no-radio`仅打开CLI；`--check`、`--status`、`--stop`和`--build-only`不拉起无线。无线依赖缺失或启动失败只提示，不阻止CLI。
+
+有桌面时无线在独立GNOME终端内运行并同时追加日志，无桌面时退回独立后台进程；已有发送端只打开日志查看终端。终端适配脚本为 `radio_window.sh`，窗口锁为 `terminal.lock`。输出追加到 `.runtime/fsd_radio/linux.log`，不登记到车辆进程清理表；停止车辆、退出或崩溃CLI不会停止无线，也不自动重启它。无线仍可单独用原 `start_linux.sh` 启动，无需CLI；双入口共用 `.runtime/fsd_radio/sender.lock` 防止重复发送，CLI还识别升级前已运行的同配置发送端。新发送窗口内Ctrl-C停止无线；仅查看日志的窗口关闭不影响已有后台发送端。也可向无线独立PID发送SIGINT；重新打开CLI会在没有发送进程时再次拉起。
 默认需要交互终端；无终端常驻管理使用 `--headless --menu`。非交互环境也可执行只读 `--check`。没有图形桌面时使用 `--no-rviz`，终端内仍可查看状态。
 `--no-window` 在新界面中禁用后台状态采集；`--plain` 保留旧逐行菜单及旧 Tk 窗口。
 界面依赖独立安装在 `.runtime/fsd_manager/ui_deps`，不会添加到 ROS 子进程的 Python 搜索路径。
