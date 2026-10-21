@@ -74,6 +74,7 @@ class ControlAPI:
     def status(self):
         m = self.manager
         return {**self.state(), 'phase': m.phase,
+                'runtime_exit_code': m.runtime_exit_code,
                 'running': bool(m.child and m.child.poll() is None),
                 'run': (m.radio_run or {}).get('scope'),
                 'checks': {key: {'ok': value['ok'], 'status': value.get('status'),

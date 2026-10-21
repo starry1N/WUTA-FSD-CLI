@@ -257,3 +257,5 @@ CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，�
 本轮仅完成源码实现与人工阅读，按用户要求未运行测试、构建、WSL或实机操作；未改动现场YAML，需配套更新宿主、CLI和显示子模块并重启加载。
 
 无线0.7.1配套：邮箱优先执行待处理的cli.check/start/stop/status/result及config.set，再处理config.list/read；同级保持到达顺序，仍由Manager原工作线程串行执行，不能抢断正在进行的操作。指令与结果的无线优先级由显示子模块独立commands队列负责，CLI不直接读写串口。未运行测试或实机操作。
+
+退出码展示：Manager将原启动任务runtime_exit_code加入state.json、control心跳及cli.status；新运行按原逻辑清空旧值，不改变退出/停止流程。Foxglove区分启动子进程退出与CLI管理器自身返回码，具体原因仍以原日志为准。

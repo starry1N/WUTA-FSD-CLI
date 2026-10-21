@@ -117,9 +117,11 @@ class Manager:
                               'runtime_checks': {key: dict(item) for key, item in self.runtime_checks.rows.items()},
                               'failures': list(self.failures), 'args': self.args,
                               'control': self.control.state(),
+                              'runtime_exit_code': self.runtime_exit_code,
                               'running': bool(self.child and self.child.poll() is None)}
         save(self.state_path, state)
         self.control.snapshot = {'phase': self.phase, 'running': state['running'],
+                                 'runtime_exit_code': self.runtime_exit_code,
                                  'run': (self.radio_run or {}).get('scope')}
         self.ui_events.put(('state', state))
 
