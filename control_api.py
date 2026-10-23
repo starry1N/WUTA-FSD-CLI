@@ -63,6 +63,8 @@ class ControlAPI:
             pass  # Never prevent Manager cleanup if its runtime directory disappeared.
 
     def submit(self, operation, **arguments):
+        if operation == 'cli.cycle_mode':
+            arguments.setdefault('expected_mode', self.snapshot.get('selected_mode'))
         if len(list(self.inbox.glob('*.json'))) >= 32:
             raise ValueError('CLI mailbox is full')
         request = {'id': uuid.uuid4().hex, 'boot': self.boot, 'op': operation,
@@ -74,6 +76,8 @@ class ControlAPI:
     def status(self):
         m = self.manager
         return {**self.state(), 'phase': m.phase,
+                'selected_mode': self.snapshot.get('selected_mode'),
+                'active_mode': self.snapshot.get('active_mode'),
                 'runtime_exit_code': m.runtime_exit_code,
                 'running': bool(m.child and m.child.poll() is None),
                 'run': (m.radio_run or {}).get('scope'),
@@ -92,7 +96,9 @@ class ControlAPI:
             return json.loads(path.read_text(encoding='utf-8'))
         if request.get('boot') != self.boot:
             raise ValueError('CLI已重启；请等待新状态后重新操作')
-        if op in ('cli.check', 'cli.start', 'cli.stop'):
+        if op in ('cli.check', 'cli.start', 'cli.stop', 'cli.cycle_mode'):
+            if op == 'cli.cycle_mode' and request.get('expected_mode') != self.status()['selected_mode']:
+                raise ValueError('运行模式已变化，请等待最新状态后重新切换')
             if op == 'cli.stop' and request.get('run') != (self.manager.radio_run or {}).get('scope'):
                 raise ValueError('运行已切换；旧停止请求未执行，请重新读取状态')
             result = self.manager.operate(op.split('.')[1])
@@ -120,7 +126,7 @@ class ControlAPI:
                 if path.stat().st_size <= 262144:
                     request = json.loads(path.read_text(encoding='utf-8'))
                     priority = request.get('op') in ('cli.check', 'cli.start', 'cli.stop',
-                                                    'cli.status', 'cli.result', 'config.set')
+                                                    'cli.status', 'cli.result', 'config.set', 'cli.cycle_mode')
             except (OSError, ValueError, TypeError, AttributeError):
                 pass  # Normal validation below produces the persisted error.
             return (not priority, path.stat().st_mtime_ns, path.name)
@@ -172,7 +178,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='调用CLI统一接口；管理进程必须已常驻')
     parser.add_argument('operation', choices=['cli.status', 'cli.result', 'cli.check', 'cli.start', 'cli.stop',
-                                            'config.list', 'config.read', 'config.set'])
+                                            'config.list', 'config.read', 'config.set', 'cli.cycle_mode'])
     parser.add_argument('--module')
     parser.add_argument('--request-id', help='cli.result查询的原始请求ID')
     parser.add_argument('--updates', help='JSON模块修改列表，含revision和changes')
@@ -185,6 +191,8 @@ def main():
     request = {'id': ident, 'op': args.operation, 'boot': state['boot'], 'run': state.get('run'),
                'expires_ns': str(time.time_ns() + 180_000_000_000),
                'source_stamp_ns': str(time.time_ns())}
+    if args.operation == 'cli.cycle_mode':
+        request['expected_mode'] = state.get('selected_mode')
     if args.request_id:
         request['request_id'] = args.request_id
     if args.module:

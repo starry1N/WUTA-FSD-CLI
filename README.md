@@ -271,3 +271,5 @@ CLI打开时由Manager清空无线运行选择，每次按`s`创建RunLog后，�
 ### 人工驾驶记录
 
 停止并清理后按 **M** 循环切换“正常→制动台架→有人跑动记录→正常”，选定后按 **S**；**X** 停止。R键已移除。也可传 `--manual-record`。与制动台架/sensor-only互斥，运行中禁止切换。保留正常传感器/感知/定位/建图/规划/任务诊断日志和实际轨迹，不启动控制器；CAN桥和接口均只收不发（含心跳/退出帧），无需选档或GO。已有外部桥或驾驶节点须先从所属入口停止。日志为 `wuta_logs/manual_record/<时间>/`；无控制来源的轨迹字段为nan，无自动任务时规划文件可只有表头，不新增rosbag。正常/台架启动拒绝复用只收桥。
+
+2026-10-23远程M键适配：control_api支持cli.cycle_mode，复用Manager.operate→cycle_run_profile，与本地M键相同；使用expected_mode校验选中模式，原boot/过期/持久ID去重保持。submit和命令行客户端自动附加当前选中模式。运行、未完成清理、sensor-only/build-only拒绝。心跳及cli.status发布selected_mode/active_mode供Foxglove原CLI状态Indicator显示；不改三模式行为或CAN/控制出口。

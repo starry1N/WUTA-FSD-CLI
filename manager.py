@@ -127,6 +127,8 @@ class Manager:
                               'running': bool(self.child and self.child.poll() is None)}
         save(self.state_path, state)
         self.control.snapshot = {'phase': self.phase, 'running': state['running'],
+                                 'selected_mode': state['selected_mode'],
+                                 'active_mode': state['active_mode'],
                                  'runtime_exit_code': self.runtime_exit_code,
                                  'run': (self.radio_run or {}).get('scope')}
         self.ui_events.put(('state', state))
@@ -536,6 +538,8 @@ class Manager:
 
     def operate(self, operation):
         """Single business entry for local keys and remote API requests."""
+        if operation == 'cycle_mode':
+            return self.cycle_run_profile()
         if operation in ('check', 'start') and self.child and self.child.poll() is None:
             self.emit('运行期间不能重复启动或执行串口独占预检查；请先停止。', 'warn')
             return False
@@ -550,7 +554,7 @@ class Manager:
 
     def command(self, command):
         if command == 'm':
-            self.cycle_run_profile()
+            self.operate('cycle_mode')
         elif command == 's':
             self.operate('start')
         elif command == 'c':
