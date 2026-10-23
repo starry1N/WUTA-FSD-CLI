@@ -6,7 +6,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
-from check_fsd_module_configs import manifest
+from check_fsd_module_configs import manifest, brake_bench_manifest
 
 
 def run(argv):
@@ -24,6 +24,8 @@ def require(paths):
 
 
 def configuration(options):
+    if 'brake-bench' in options:
+        return brake_bench_manifest(options.get('controller-config'), options.get('can-config'), os.environ.get('CAN_IFACE', ''))
     data = manifest(options.get('controller-config'), options.get('can-config'),
                     options.get('model', os.environ.get('MODEL', '')),
                     os.environ.get('CAN_IFACE', ''))
@@ -32,6 +34,9 @@ def configuration(options):
 
 
 def dependencies(options):
+    if 'brake-bench' in options:
+        require(['/opt/ros/humble/setup.bash', ROOT / 'zlgcan_bridge/start_zlg_bridge.sh', ROOT / 'tools/run_privileged_group.py'])
+        return '制动台架ROS与CAN部署入口存在；豁免传感器驱动/模型依赖'
     require(['/opt/ros/humble/setup.bash',
              os.environ.get('ZED_SETUP', '/home/wuta/WUTA/zed/install/setup.bash'),
              os.environ.get('RSLIDAR_SETUP', '/home/wuta/WUTA/rslidar_sdk/install/setup.bash'),
@@ -45,6 +50,8 @@ def dependencies(options):
 
 
 def serial(options):
+    if 'brake-bench' in options:
+        return '跳过：制动台架不启动传感器、定位或RViz'
     port = options.get('ins-port', os.environ.get(
         'INS_PORT', '/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_BKEDc143M08-if00-port0'))
     if not os.access(port, os.R_OK | os.W_OK):
@@ -56,6 +63,8 @@ def serial(options):
 
 
 def lidar(options):
+    if 'brake-bench' in options:
+        return '跳过：制动台架不启动传感器、定位或RViz'
     iface = os.environ.get('LIDAR_IFACE', 'enp8s0')
     ip = os.environ.get('LIDAR_IP', '192.168.1.102/24')
     if Path(f'/sys/class/net/{iface}/carrier').read_text().strip() != '1':
@@ -76,6 +85,8 @@ def can(options):
 
 
 def calibration(options):
+    if 'brake-bench' in options:
+        return '跳过：制动台架不启动传感器、定位或RViz'
     import math
     import yaml
     require([options.get('calibration', os.environ.get('CALIBRATION', str(ROOT / 'config/camera_lidar.yaml')))])
@@ -93,6 +104,8 @@ def calibration(options):
 
 
 def visualization(options):
+    if 'brake-bench' in options:
+        return '跳过：制动台架不启动传感器、定位或RViz'
     if not options.get('_rviz', 'no-rviz' not in options):
         return '已禁用 RViz；按原脚本跳过可视化文件和桌面检查'
     require([ROOT / 'fsd-visualization-code/start.sh',
@@ -106,7 +119,7 @@ def visualization(options):
 def build_artifacts(options):
     paths = [ROOT / 'humble-chcnav-cgi_ros2pkg/install/setup.bash',
              ROOT / 'WUTA-FSD/ros2_ws/install/setup.bash']
-    if options.get('_rviz', 'no-rviz' not in options):
+    if options.get('_rviz', 'no-rviz' not in options) and 'brake-bench' not in options:
         paths.append(ROOT / 'fsd-visualization-code/install/local_setup.bash')
     missing = [str(path) for path in paths if not path.is_file()]
     mode = options.get('_build', 'no' if 'skip-build' in options else 'yes' if 'build' in options else 'auto')
@@ -119,9 +132,26 @@ def build_artifacts(options):
     return '华测、FSD及启用的可视化安装入口存在；原脚本启动时加载'
 
 
+def manual_record_occupancy(options):
+    if 'manual-record' not in options:
+        return '普通运行沿用原单实例检查'
+    blocked = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / 'cmdline').read_bytes().split(b'\0')[0].decode()
+        except (OSError, UnicodeError):
+            continue
+        if Path(command).name in ('controller_node', 'can_interface_node', 'mission_manager_node', 'zlg_can_bridge'):
+            blocked.append(f'{entry.name}:{Path(command).name}')
+    if blocked:
+        raise RuntimeError('人工驾驶记录启动前须停止已有驾驶链路/CAN桥：' + ', '.join(blocked))
+    return '未发现已有驾驶链路或CAN桥；本次将独占启动只收桥'
+
+
 def can_occupancy(options):
-    data = manifest(options.get('controller-config'), options.get('can-config'),
-                    options.get('model', os.environ.get('MODEL', '')), os.environ.get('CAN_IFACE', ''))
+    data = configuration(options)
     selected = data['deployment']['can_device']
     result = subprocess.run(['pgrep', '-x', 'zlg_can_bridge'], capture_output=True, text=True, timeout=10)
     if result.returncode not in (0, 1):
@@ -140,8 +170,12 @@ def can_occupancy(options):
             elif argument.startswith('--iface='):
                 iface = argument.split('=', 1)[1]
         if iface == selected:
+            if '--receive-only' in args:
+                raise RuntimeError('正常/台架模式不能复用只收CAN桥；请先停止该桥')
             matches.append(pid)
     # This intentionally follows can_bridge_pid/check_prerequisites in the old script.
+    if 'manual-record' in options and all_pids:
+        raise RuntimeError('人工驾驶记录禁止复用外部CAN桥；请先停止已有桥')
     if len(matches) == 1 and len(all_pids) == 1:
         return f'外部桥 PID={matches[0]}，接口={selected}；启动时验证并复用，退出 FSD 时保留'
     if all_pids:
@@ -175,4 +209,4 @@ def observer(options):
 CHECKS = {'模块配置': configuration, 'ROS与部署': dependencies, '华测串口': serial,
           'M1网络': lidar, 'CAN硬件': can, '外参与TF': calibration,
           'RViz部署与桌面': visualization, '工作空间产物': build_artifacts,
-          'CAN桥占用': can_occupancy, '原启动器单实例': supervisor, '只读任务监控文件': observer}
+          '人工记录占用': manual_record_occupancy, 'CAN桥占用': can_occupancy, '原启动器单实例': supervisor, '只读任务监控文件': observer}

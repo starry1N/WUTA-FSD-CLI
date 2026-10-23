@@ -79,7 +79,7 @@ class FsdApp(App):
     Select { border: none; }
     * { scrollbar-background: #181825; scrollbar-color: #45475a; scrollbar-color-active: #89b4fa; }
     """
-    BINDINGS = [Binding('c', 'operate("c")', '检查'), Binding('s', 'operate("s")', '启动'),
+    BINDINGS = [Binding('m', 'operate("m")', '切换正常/台架/有人记录'), Binding('c', 'operate("c")', '检查'), Binding('s', 'operate("s")', '启动'),
                 Binding('p', 'operate("p")', '权限'), Binding('x', 'operate("x")', '停止'),
                 Binding('q', 'quit', '清理退出'), Binding('ctrl+q', 'quit', show=False, priority=True),
                 Binding('ctrl+c', 'operate("x")', show=False, priority=True),
@@ -139,7 +139,7 @@ class FsdApp(App):
                 yield Select([('全部配置清单', '__all__')], prompt='选择模块配置',
                              allow_blank=False, id='module-config')
                 yield RichLog(id='detail', wrap=True, markup=False, max_lines=3000, min_width=1)
-        yield Static('C 检查   S 启动   P 权限   X 停止   E 编辑配置   Q 清理退出', id='actions')
+        yield Static('M 切换模式   C 检查   S 启动   P 权限   X 停止   E 配置   Q 退出', id='actions')
         yield Static('↑↓ 选择   Enter 打开   Tab 切换区域   Space 暂停日志', id='keys')
 
     def on_mount(self):
@@ -294,6 +294,10 @@ class FsdApp(App):
         failed = sum(not item['ok'] for item in checks.values())
         verified = sum(item['ok'] is True for item in runtime.values())
         status = f'{self.state_data.get("phase", "等待操作")}   ·   预检查 {ok}/{len(CHECKS)} 失败 {failed}   ·   启动验证 {verified} 项'
+        labels = {'manual_record': '有人跑动记录（CAN只收不发）', 'brake_bench': '制动台架', 'sensor_only': '仅传感器', 'hardware': '正常', 'normal': '正常'}
+        selected = labels.get(self.state_data.get('selected_mode'), '正常')
+        active = self.state_data.get('active_mode')
+        status = f"选择：{selected} / 运行：{labels.get(active, '未运行')} · " + status
         if self.busy:
             status += '   ·   操作处理中'
         if self.paused:

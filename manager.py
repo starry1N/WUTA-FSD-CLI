@@ -43,6 +43,8 @@ def save(path, data):
 def options_from(args):
     options = {arg[2:].split('=', 1)[0]: arg.split('=', 1)[1] if '=' in arg else True
                for arg in args if arg.startswith('--')}
+    if sum(key in options for key in ('manual-record', 'brake-bench', 'sensor-only')) > 1:
+        raise ValueError('manual-record / brake-bench / sensor-only 模式互斥')
     options['_rviz'] = True
     options['_build'] = 'auto'
     for arg in args:
@@ -50,6 +52,8 @@ def options_from(args):
             options['_rviz'] = arg != '--no-rviz'
         if arg in ('--build', '--skip-build'):
             options['_build'] = 'yes' if arg == '--build' else 'no'
+    if 'brake-bench' in options:
+        options['_rviz'] = False
     return options
 
 
@@ -118,6 +122,8 @@ class Manager:
                               'failures': list(self.failures), 'args': self.args,
                               'control': self.control.state(),
                               'runtime_exit_code': self.runtime_exit_code,
+                              'selected_mode': 'manual_record' if 'manual-record' in self.options else 'brake_bench' if 'brake-bench' in self.options else 'sensor_only' if 'sensor-only' in self.options else 'normal',
+                              'active_mode': self.run_log.data['mode'] if self.run_log else None,
                               'running': bool(self.child and self.child.poll() is None)}
         save(self.state_path, state)
         self.control.snapshot = {'phase': self.phase, 'running': state['running'],
@@ -149,6 +155,8 @@ class Manager:
                     if (name == 'RViz部署与桌面' and not self.options.get('_rviz', True)) or (
                             name == '只读任务监控文件' and 'sensor-only' in self.options):
                         status = '跳过'
+                    elif str(result).startswith('跳过'):
+                        status = '跳过'
                     elif str(result).startswith('警告'):
                         status = '警告'
                     elif name == '工作空间产物' and str(result).startswith(('需自动构建', '指定强制构建')):
@@ -177,7 +185,7 @@ class Manager:
             self.emit(f'sudo 认证失败，退出码 {authentication.returncode}：{authentication.stderr.strip()}。可输入 p 重试。', 'error')
             return False
         self.runtime_checks.set('sudo', '认证通过', 'sudo 自动认证通过；CAN初始化和串口权限处理使用此权限', True)
-        if 'reuse-ins' in self.options:
+        if 'reuse-ins' in self.options or 'brake-bench' in self.options:
             return True
         port = self.options.get('ins-port', os.environ.get(
             'INS_PORT', '/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_BKEDc143M08-if00-port0'))
@@ -295,7 +303,7 @@ class Manager:
             return
         self.runtime_checks = RuntimeChecks(self.options)
         self.runtime_checks.begun = True
-        mode = 'sensor_only' if 'sensor-only' in self.options else 'hardware'
+        mode = 'manual_record' if 'manual-record' in self.options else 'brake_bench' if 'brake-bench' in self.options else 'sensor_only' if 'sensor-only' in self.options else 'hardware'
         mission = mission_source = vcu_mode = None
         if mode == 'hardware':
             config = self.options.get('can-config')
@@ -492,8 +500,39 @@ class Manager:
         self.publish()
         return not remaining
 
+    def cycle_run_profile(self):
+        if (self.child is not None or self.run_log is not None or
+            any(matches(item) for item in self.records.values() if not (
+                self.dashboard and self.dashboard.poll() is None and
+                item['pid'] in {row['pid'] for row in descendants(self.dashboard.pid)}))):
+            self.emit('运行或清理期间不能切换模式，请先 X 停止并完成清理。', 'warn')
+            return False
+        if 'sensor-only' in self.options or 'build-only' in self.options:
+            self.emit('sensor-only/build-only 会话不能切换运行模式，请使用正常CLI菜单。', 'warn')
+            return False
+        profiles = (None, 'brake-bench', 'manual-record')
+        current = next((key for key in profiles if key and key in self.options), None)
+        profile = profiles[(profiles.index(current) + 1) % len(profiles)]
+        labels = {
+            None: '正常全车；恢复传感器和定位门控',
+            'brake-bench': '制动台架（直线加速选档+真实GO；以控制器配置为准）',
+            'manual-record': '有人跑动记录（正常日志与实际轨迹；CAN只收不发，无控制器，无需GO）',
+        }
+        self.args = [arg for arg in self.args if arg not in ('--brake-bench', '--manual-record')]
+        if profile:
+            self.args.append('--' + profile)
+        self.options = options_from(self.args)
+        if self.control.store is not None:
+            self.control.store.options = self.options
+        self.results = {}
+        self.runtime_checks = RuntimeChecks(self.options)
+        self.phase = '等待操作'
+        self.emit('运行模式：' + labels[profile], 'warn' if profile else 'info')
+        self.publish()
+        return True
+
     def menu(self):
-        self.emit('s 启动/重试 | c 并行检查 | p 权限处理 | w 日志窗口 | l 日志尾部 | x 停止并清残留 | q 清理并退出 | h 菜单；配置接口：python3 fsd_startup/control_api.py --help', 'title')
+        self.emit('m 循环切换正常/制动台架/有人跑动记录（仅停止时） | s 启动/重试 | c 并行检查 | p 权限处理 | w 日志窗口 | l 日志尾部 | x 停止并清残留 | q 清理并退出 | h 菜单；配置接口：python3 fsd_startup/control_api.py --help', 'title')
 
     def operate(self, operation):
         """Single business entry for local keys and remote API requests."""
@@ -510,7 +549,9 @@ class Manager:
         raise ValueError('Unknown Manager operation')
 
     def command(self, command):
-        if command == 's':
+        if command == 'm':
+            self.cycle_run_profile()
+        elif command == 's':
             self.operate('start')
         elif command == 'c':
             self.operate('check')

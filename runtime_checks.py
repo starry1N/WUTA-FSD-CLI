@@ -45,6 +45,18 @@ class RuntimeChecks:
                 self.skip('topic:' + topic, 'sensor-only 不检查此话题')
             self.skip('observer', 'sensor-only 不启动任务监控')
             self.skip('gnss', 'sensor-only 不启动任务机；传感器页仍显示GNSS状态')
+        if 'manual-record' in options:
+            self.skip('process:controller', '人工驾驶记录不启动控制器；CAN桥和接口均只收不发')
+            self.skip('gnss', '人工驾驶记录无需发车门控；真实GNSS诊断继续记录')
+        if 'brake-bench' in options:
+            for name in set(PROCESS_NAMES) - {'zlg_can', 'controller', 'can_interface', 'mission_manager'}:
+                self.skip('process:' + name, '制动台架不启动此模块')
+            for topic in TOPICS:
+                if topic != '任务状态广播':
+                    self.skip('topic:' + topic, '制动台架不依赖传感器或定位输入')
+            self.skip('gnss', '制动台架豁免GNSS，由任务机声明')
+            self.skip('build:可视化构建', '制动台架不构建可视化')
+            self.skip('build:华测构建', '仅使用惯导消息类型，不构建惯导驱动')
         if 'reuse-ins' in options:
             self.skip('process:chcnav', '复用外部惯导；数据输出仍由原脚本检查')
         if not options.get('_rviz', 'no-rviz' not in options) and not build_only:

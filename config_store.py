@@ -158,6 +158,9 @@ class ConfigStore:
         return self.catalog()[module].expanduser().resolve(strict=True)
 
     def manifest(self, documents=None):
+        if 'brake-bench' in self.options:
+            return audit.brake_bench_manifest(self.options.get('controller-config'), self.options.get('can-config'),
+                                              os.environ.get('CAN_IFACE', ''), documents=documents)
         return audit.manifest(self.options.get('controller-config'), self.options.get('can-config'),
                               self.options.get('model', os.environ.get('MODEL', '')),
                               os.environ.get('CAN_IFACE', ''), documents=documents)

@@ -70,7 +70,7 @@ class RunLog:
         root = Path(root).resolve()
         if mission not in MISSION_NAMES:
             mission = None
-        category = mission or ('sensor_only' if mode == 'sensor_only' else 'pending')
+        category = 'manual_record' if mode == 'manual_record' else mission or ('sensor_only' if mode == 'sensor_only' else 'pending')
         if path is None:
             path = new_directory(root / 'wuta_logs' / category)
         else:
@@ -86,7 +86,7 @@ class RunLog:
         for folder in folders:
             (path / folder).mkdir()
         source = mission_source or (
-            'sensor_only' if mode == 'sensor_only' else
+            mode if mode in ('sensor_only', 'manual_record') else
             'cli' if mission else 'fallback_pending')
         data = dict(schema_version=2, run_id=path.name, started_at=timestamp(),
                     radio_scope=uuid.uuid4().hex, started_stamp_ns=str(time.time_ns()),
