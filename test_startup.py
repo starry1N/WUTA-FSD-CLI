@@ -8,6 +8,7 @@ import threading
 import time
 from unittest.mock import patch
 from types import SimpleNamespace
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from processes import cleanup, descendants, identity, matches
@@ -163,3 +164,19 @@ def test_dashboard_reports_sensor_age_and_request_values():
         assert '[超时]' in telemetry.lines(['相机'])
         telemetry.record('控制请求', SimpleNamespace(speed=2., angle=3., throttle_brake=.4))
         assert '请求值' in telemetry.lines(['控制请求'])
+
+
+def test_lidar_telemetry_reliability_preserves_other_sensor_and_emergency_qos():
+    pytest.importorskip('rclpy')
+    from dashboard import telemetry_qos
+    from rclpy.qos import ReliabilityPolicy, DurabilityPolicy
+    lidar = telemetry_qos('sensor_msgs/msg/PointCloud2', '雷达')
+    assert lidar.reliability == ReliabilityPolicy.RELIABLE and lidar.depth == 1
+    assert lidar.durability == DurabilityPolicy.VOLATILE
+    camera = telemetry_qos('sensor_msgs/msg/Image', '相机')
+    assert camera.reliability == ReliabilityPolicy.RELIABLE
+    ins = telemetry_qos('nav_msgs/msg/Odometry', '惯导')
+    assert ins.reliability == ReliabilityPolicy.BEST_EFFORT
+    emergency = telemetry_qos('std_msgs/msg/Bool', '急停广播')
+    assert emergency.reliability == ReliabilityPolicy.RELIABLE
+    assert emergency.durability == DurabilityPolicy.TRANSIENT_LOCAL

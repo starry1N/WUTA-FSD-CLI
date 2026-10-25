@@ -39,6 +39,18 @@ def message_summary(key, msg):
     return str(msg.data)
 
 
+def telemetry_qos(kind, key):
+    """Reliable perception inputs; preserve INS and latched emergency QoS."""
+    from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+    if key == '急停广播':
+        return QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    reliability = (ReliabilityPolicy.RELIABLE if kind in ('sensor_msgs/msg/PointCloud2', 'sensor_msgs/msg/Image',
+                                            'sensor_msgs/msg/CameraInfo', 'wuta_msgs/msg/ConeArray')
+                   else ReliabilityPolicy.BEST_EFFORT)
+    return QoSProfile(depth=1, reliability=reliability)
+
+
 class Telemetry:
     def __init__(self, state_path):
         self.state_path = state_path
@@ -116,7 +128,6 @@ class Telemetry:
         node = None
         try:
             import rclpy
-            from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
             from rosidl_runtime_py.utilities import get_message
             rclpy.init()
             node = rclpy.create_node('fsd_startup_readonly_dashboard')
@@ -142,10 +153,7 @@ class Telemetry:
             ]
             subscriptions = []
             for key, topic, kind in topics:
-                qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
-                if key == '急停广播':
-                    qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                                     durability=DurabilityPolicy.TRANSIENT_LOCAL)
+                qos = telemetry_qos(kind, key)
                 subscriptions.append(node.create_subscription(get_message(kind), topic,
                                      lambda msg, key=key: self.record(key, msg), qos))
             while not self.quit.is_set():
