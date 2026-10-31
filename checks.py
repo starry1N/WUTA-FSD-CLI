@@ -41,8 +41,9 @@ def dependencies(options):
              os.environ.get('ZED_SETUP', '/home/wuta/WUTA/zed/install/setup.bash'),
              os.environ.get('RSLIDAR_SETUP', '/home/wuta/WUTA/rslidar_sdk/install/setup.bash'),
              ROOT / 'zlgcan_bridge/start_zlg_bridge.sh', ROOT / 'tools/run_privileged_group.py',
-             ROOT / 'WUTA-FSD/ros2_ws/src/perception/detection_fusion/launch/fusion_modules_hardware.launch.py',
-             ROOT / 'humble-chcnav-cgi_ros2pkg/src/chcnav/scripts/start_chcnav_fsd.sh'])
+             ROOT / 'WUTA-FSD/ros2_ws/src/perception/detection_fusion/launch/fusion_modules_hardware.launch.py'])
+    if 'no-ins' not in options:
+        require([ROOT / 'humble-chcnav-cgi_ros2pkg/src/chcnav/scripts/start_chcnav_fsd.sh'])
     deps = Path(os.environ.get('HARDWARE_DEPS', '/home/wuta/lyx/WUTA/.hardware_deps'))
     if not deps.is_dir():
         raise RuntimeError(f'缺少硬件 Python 依赖目录：{deps}')
@@ -50,6 +51,8 @@ def dependencies(options):
 
 
 def serial(options):
+    if 'no-ins' in options:
+        return '跳过：--no-ins不启动惯导，不检查串口、权限或占用；--with-ins恢复'
     if 'brake-bench' in options:
         return '跳过：制动台架不启动传感器、定位或RViz'
     port = options.get('ins-port', os.environ.get(

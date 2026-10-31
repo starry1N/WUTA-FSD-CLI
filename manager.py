@@ -48,6 +48,10 @@ def options_from(args):
     options['_rviz'] = True
     options['_build'] = 'auto'
     for arg in args:
+        if arg == '--no-ins':
+            options['no-ins'] = True
+        elif arg == '--with-ins':
+            options.pop('no-ins', None)
         if arg in ('--rviz', '--image-view', '--no-rviz'):
             options['_rviz'] = arg != '--no-rviz'
         if arg in ('--build', '--skip-build'):
@@ -187,6 +191,9 @@ class Manager:
             self.emit(f'sudo 认证失败，退出码 {authentication.returncode}：{authentication.stderr.strip()}。可输入 p 重试。', 'error')
             return False
         self.runtime_checks.set('sudo', '认证通过', 'sudo 自动认证通过；CAN初始化和串口权限处理使用此权限', True)
+        if 'no-ins' in self.options:
+            self.emit('[跳过] 惯导已禁用：不处理惯导串口权限；--with-ins恢复', 'warn')
+            return True
         if 'reuse-ins' in self.options or 'brake-bench' in self.options:
             return True
         port = self.options.get('ins-port', os.environ.get(

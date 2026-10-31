@@ -57,7 +57,12 @@ class RuntimeChecks:
             self.skip('gnss', '制动台架豁免GNSS，由任务机声明')
             self.skip('build:可视化构建', '制动台架不构建可视化')
             self.skip('build:华测构建', '仅使用惯导消息类型，不构建惯导驱动')
-        if 'reuse-ins' in options:
+        if 'no-ins' in options:
+            self.skip('process:chcnav', '--no-ins不启动或复用惯导；--with-ins恢复')
+            self.skip('topic:华测惯导输出', '--no-ins不等待惯导数据')
+            self.skip('topic:定位输出', '惯导已禁用，仅豁免定位首帧检查，不代表定位就绪')
+            self.skip('build:华测构建', '--no-ins仅保留msg_interfaces消息包，不构建惯导驱动')
+        elif 'reuse-ins' in options:
             self.skip('process:chcnav', '复用外部惯导；数据输出仍由原脚本检查')
         if not options.get('_rviz', 'no-rviz' not in options) and not build_only:
             self.skip('process:visualization', '--no-rviz 不启动可视化')

@@ -86,7 +86,7 @@ def test_parallel_topic_probes_collect_failures_without_supervisor_cleanup(tmp_p
         'wait_independent_sensor_topics() {', 1)[1].split('\n}\n', 1)[0] + '\n}\n'
     harness = '''
 set -Eeuo pipefail
-LIDAR_TOPIC=lidar; IMAGE_TOPIC=image; INS_TOPIC=ins; SENSOR_ONLY=0; REUSE_INS=0
+LIDAR_TOPIC=lidar; IMAGE_TOPIC=image; INS_TOPIC=ins; SENSOR_ONLY=0; REUSE_INS=0; DISABLE_INS=0
 trap 'echo cleanup >> events' EXIT
 wait_topic() {
     [[ "$TOPIC_CHECK_WORKER" == 1 ]]
